@@ -1,0 +1,283 @@
+---
+title: "Titre de votre projet"
+subtitle: "Sous-titre optionnel"
+author:
+  - name: "Prénom Nom"
+  - name: "Prénom Nom"
+  - name: "Prénom Nom"
+date: today
+mermaid:
+      theme: neutral
+
+# ─────────────────────────────────────────────
+# GROUPE
+# ─────────────────────────────────────────────
+group: "Groupe 1"
+
+# ─────────────────────────────────────────────
+# THÈME — décommenter UNE seule ligne
+# Thèmes clairs  : cosmo | flatly | lux | minty | journal | sandstone | yeti
+# Thèmes sombres : darkly | slate | superhero | cyborg
+# ─────────────────────────────────────────────
+format:
+  html:
+    code-copy: true
+    toc: true
+    toc-depth: 3
+    toc-title: "Sommaire"
+    number-sections: true
+    highlight-style: github
+    theme: cosmo        # ← changer ici
+    # theme: flatly
+    # theme: lux
+    # theme: minty
+    # theme: darkly
+    # theme: slate
+
+lang: fr
+---
+
+**{{< meta group >}}**
+
+---
+
+::: {.callout-warning title="À lire avant de commencer — puis à supprimer"}
+Les blocs de consigne (comme celui-ci) vous guident section par section.
+**Supprimez tous les blocs de consigne avant la remise**.
+
+Rappels importants :
+
+- **Configuration réseau** : n'oubliez pas surtout si vous avez plusieurs VMs 
+- **Snapshots VirtualBox** : prenez un snapshot avant chaque étape majeure. En cas d'erreur, vous revenez en arrière en quelques secondes.
+- La **checklist avant remise** se trouve en fin de document.
+:::
+
+## Introduction
+
+::: {.callout-important title="Consigne"}
+Décrivez en quelques paragraphes l'objectif du projet, le contexte et la problématique à laquelle vous répondez. Expliquez **ce que vous avez mis en place**, **pourquoi** vous avez choisi ces technologies.
+:::
+
+### Objectif
+
+Décrivez ici l'objectif concret du projet : quel service voulez-vous mettre en place, pour quel usage ?
+
+### Contexte et problématique
+
+Expliquez le problème que résout votre solution. Par exemple : "Sans reverse proxy, le serveur applicatif est exposé directement sur Internet, ce qui pose des problèmes de sécurité et de flexibilité."
+
+### Éléments inédits
+
+Décrivez précisément le(s) élément(s) **totalement inédit** de votre projet par rapport au cours. 
+
+
+## Configuration réseau VirtualBox
+
+::: {.callout-important title="Consigne"}
+Cette section est **obligatoire**. Elle doit permettre à quelqu'un de reproduire exactement votre environnement réseau depuis zéro. **Regardez l'exemple pour vous inspirer !**
+:::
+
+
+## Architecture
+
+::: {.callout-important title="Consigne"}
+Présentez un schéma d'architecture de votre projet, **de préférence en Mermaid** (voir le guide `02_installation_getstarted.qmd` et l'exemple fourni). Le schéma doit inclure **les noms des VMs, leurs IPs, les ports utilisés et les flux réseau**. Un schéma sans IPs ni ports n'est pas suffisant.
+:::
+
+### Schéma d'architecture
+
+```{mermaid}
+flowchart TD
+    H([Machine hôte<br/>192.168.56.1]) -->|Protocole :port| A
+    subgraph HO[Réseau host-only 192.168.56.0/24]
+        A[vm-xxx<br/>Rôle — Debian 12<br/>192.168.56.N0<br/>ports ...]
+        B[vm-yyy<br/>Rôle — Debian 12<br/>192.168.56.N1<br/>ports ...]
+        A -->|Protocole :port| B
+    end
+```
+
+### Tableau des composants
+
+| Composant | VM | IP | Port(s) | Rôle |
+|---|---|---|---|---|
+| Service A | vm-xxx | 192.168.56.N0 | XXX | Description |
+| Service B | vm-yyy | 192.168.56.N1 | YYY | Description |
+
+
+## Diagramme au choix
+
+::: {.callout-important title="Consigne"}
+Choisissez un type de diagramme **pertinent et différent** du schéma d'architecture. Exemples : diagramme de séquence (flux d'une requête), diagramme d'états (cycle de vie d'un composant), diagramme de flux de données. Expliquez pourquoi vous avez choisi ce type de diagramme et ce qu'il apprend de plus que le schéma d'architecture.
+:::
+
+```{mermaid}
+sequenceDiagram
+    participant C as Client
+    participant S1 as Service A
+    participant S2 as Service B
+
+    C->>S1: Requête
+    S1->>S2: Transfert
+    S2-->>S1: Réponse
+    S1-->>C: Réponse
+```
+
+Expliquez le diagramme en quelques lignes : que représente-t-il, comment le lire, qu'apprend-on de plus par rapport au schéma d'architecture ?
+
+
+## Installation et déploiement
+
+::: {.callout-important title="Consigne"}
+Décrivez la procédure **complète et reproductible**, étape par étape, sur Debian 12. Pour chaque étape :
+
+- indiquez sur **quelle VM** les commandes s'exécutent ;
+- expliquez en une phrase **pourquoi cette étape est nécessaire** (ligne "Pourquoi") — c'est ce qui distingue une documentation comprise d'un copier-coller ;
+- terminez par une **vérification immédiate** avec la sortie attendue.
+
+Les commandes doivent avoir été testées et fonctionner telles quelles.
+:::
+
+### Prérequis
+
+- [ ] VMs créées et configurées selon la section "Configuration réseau VirtualBox"
+- [ ] Connectivité vérifiée (ping VM↔VM et hôte→VM)
+- [ ] Snapshot VirtualBox "état initial" pris sur chaque VM
+- [ ] Accès root ou sudo sur toutes les VMs
+- [ ] Mises à jour système effectuées (`apt update && apt upgrade -y`)
+
+### [Titre de l'étape] (sur vm-xxx)
+
+**Pourquoi :** expliquez en une phrase le rôle de cette étape dans la solution globale.
+
+```bash
+# Commandes à exécuter sur vm-xxx
+apt update && apt upgrade -y
+apt install -y paquet1 paquet2
+```
+
+### [Titre de l'étape] (sur vm-yyy)
+
+**Pourquoi :** ...
+
+```bash
+# Commandes à exécuter sur vm-yyy
+...
+```
+
+### [Titre de l'étape]
+
+...
+
+
+## Vérification et tests
+
+::: {.callout-important title="Consigne"}
+Cette section doit **prouver** que votre solution fonctionne. Chaque test doit indiquer la commande utilisée, la sortie obtenue (copiée-collée ou en capture) et le résultat.
+
+Deux tests sont **obligatoires** quel que soit le sujet.
+Un test sans preuve n'est pas un test.
+
+:::
+
+### Tableau récapitulatif des tests
+
+| # | Test | Commande / Action | Résultat attendu | Résultat obtenu | ✅/❌ |
+|---|---|---|---|---|---|
+| 1 | [Description] | `commande` | [Sortie attendue] | [Sortie réelle] | ✅ |
+| 2 | [Description] | [Action UI] | [Comportement attendu] | [Comportement réel] | ✅ |
+| 3 | Panne simulée | `systemctl stop service` | Erreur X renvoyée | [Résultat réel] | ✅ |
+| 4 | Sécurité négative | `commande interdite` | Accès refusé | [Résultat réel] | ✅ |
+
+### Test 1 — [Titre]
+
+Description du test et de ce qu'il valide.
+
+```bash
+# Commande de test
+commande
+# → Sortie obtenue (copier-coller la vraie sortie ici)
+```
+
+::: {.callout-tip}
+**📷 Capture :** [description de la capture jointe].
+:::
+
+### Test 2 — [Titre]
+
+...
+
+## Problèmes rencontrés
+
+::: {.callout-important title="Consigne"}
+Décrivez les 2 à 4 problèmes qui vous ont le plus bloqués, avec la structure **Symptôme / Cause / Solution**. Cette section montre votre compréhension réelle du projet — elle doit refléter ce qui s'est *réellement* passé dans vos VMs.
+:::
+
+**1. [Titre du problème]**
+
+*Symptôme :* ce que vous observiez (message d'erreur, comportement inattendu).
+
+*Cause :* ce qui provoquait le problème.
+
+*Solution :* comment vous l'avez résolu.
+
+---
+
+**2. [Titre du problème]**
+
+*Symptôme :* ...
+
+*Cause :* ...
+
+*Solution :* ...
+
+---
+
+**3. [Titre du problème]**
+
+...
+
+
+## Distribution des tâches
+
+| Membre | Tâches réalisées |
+|---|---|
+| Prénom Nom 1 | ... |
+| Prénom Nom 2 | ... |
+| Prénom Nom 3 | ... |
+| Prénom Nom 4 | ... |
+
+
+## Améliorations possibles
+
+::: {.callout-important title="Consigne"}
+Proposez des améliorations concrètes et réalistes. Évitez les généralités ("on pourrait améliorer la sécurité") — soyez précis ("on pourrait remplacer le certificat auto-signé par Let's Encrypt via certbot, ce qui nécessiterait un nom de domaine public").
+:::
+
+- **Amélioration 1 :** description précise et justification.
+- **Amélioration 2 :** description précise et justification.
+- **Amélioration 3 :** description précise et justification.
+
+
+## Conclusion
+
+::: {.callout-important title="Consigne"}
+Résumez ce qui a été mis en place et ce que le projet vous a appris. Donnez votre ressenti de groupe : qu'est-ce qui a été difficile, qu'est-ce qui vous a surpris, qu'est-ce que vous referiez différemment ?
+:::
+
+...
+
+
+## Checklist avant remise
+
+::: {.callout-important title="À vérifier — puis supprimer cette section"}
+- [ ] `quarto render` fonctionne sans erreur ni warning
+- [ ] Noms des membres et numéro de groupe remplis (en-tête YAML)
+- [ ] Tous les blocs de consigne supprimés (y compris celui-ci et cette checklist)
+- [ ] Configuration réseau présente
+- [ ] Schéma d'architecture avec IPs et ports
+- [ ] Tableau de tests entièrement complété avec les résultats réels
+- [ ] Toutes les captures d'écran présentes dans `images/` et affichées dans le rendu
+- [ ] Section "Problèmes rencontrés" avec structure Symptôme/Cause/Solution
+- [ ] Orthographe relue (activez le correcteur dans VS Code)
+- [ ] Archive remise : `.qmd` + dossier `images/`
+:::

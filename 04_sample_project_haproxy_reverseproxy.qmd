@@ -1,0 +1,653 @@
+---
+title: "Reverse Proxy HTTPS pour site PHP"
+subtitle: "Mise en place avec HAProxy sur Debian 12"
+author:
+  - name: "Prénom Nom"
+  - name: "Prénom Nom"
+  - name: "Prénom Nom"
+date: today
+
+# ─────────────────────────────────────────────
+# GROUPE
+# ─────────────────────────────────────────────
+group: "Groupe 1"
+
+# ─────────────────────────────────────────────
+# THÈME — décommenter UNE seule ligne
+# Thèmes clairs  : cosmo | flatly | lux | minty | journal | sandstone | yeti
+# Thèmes sombres : darkly | slate | superhero | cyborg
+# ─────────────────────────────────────────────
+format:
+  html:
+    code-copy: true
+    toc: true
+    toc-depth: 3
+    toc-title: "Sommaire"
+    number-sections: true
+    highlight-style: github
+    theme: cosmo        # ← changer ici
+    # theme: flatly
+    # theme: lux
+    # theme: minty
+    # theme: darkly
+    # theme: slate
+
+lang: fr
+---
+
+**{{< meta group >}}**
+
+---
+
+## Introduction
+
+### Objectif
+
+Ce projet met en place un **reverse proxy HTTPS** avec **HAProxy** devant un site web développé en **PHP** (Apache2 + PHP 8.2). Le reverse proxy constitue le point d'entrée unique pour les clients : il reçoit les connexions HTTPS sur le port 443, gère la terminaison TLS, puis transmet les requêtes en HTTP vers le serveur backend PHP sur le réseau interne.
+
+### Contexte et problématique
+
+Sans reverse proxy, un serveur web PHP est exposé directement à Internet avec plusieurs inconvénients : il doit gérer lui-même les certificats TLS, il est directement visible et attaquable, et il est difficile d'ajouter d'autres serveurs derrière sans reconfigurer les clients.
+
+HAProxy résout ces problèmes en centralisant la terminaison TLS, en masquant les backends, et en permettant d'ajouter facilement de la redondance ou de la répartition de charge sans toucher à la configuration des clients.
+
+### Éléments inédits
+
+HAProxy n'a pas été vu au cours. Configuration avec plusieurs VMs.
+
+
+## Configuration réseau VirtualBox
+
+### VMs créées
+
+| Nom de la VM | Rôle | OS | RAM allouée | Disque |
+|---|---|---|---|---|
+| vm-proxy | Reverse proxy HAProxy | Debian 12 | 1 Go | 20 Go |
+| vm-backend | Serveur web Apache + PHP | Debian 12 | 1 Go | 20 Go |
+
+### Interfaces réseau VirtualBox
+
+Chaque VM dispose de **deux interfaces réseau** dans VirtualBox :
+
+| Interface | Type VirtualBox | Rôle |
+|---|---|---|
+| eth0 (enp0s3) | NAT | Accès Internet (apt, mises à jour) |
+| eth1 (enp0s8) | Host-only (`vboxnet0`) | Communication entre VMs et avec la machine hôte |
+
+::: {.callout-note}
+**Pourquoi host-only et pas "réseau interne" ?** Le réseau interne (`intnet`) isole les VMs entre elles mais la **machine hôte ne peut pas les joindre**. Le host-only crée le réseau `192.168.56.0/24` partagé entre les VMs **et l'hôte** (`192.168.56.1`) : on peut ainsi tester le site depuis le navigateur de l'hôte, et le correcteur peut faire de même.
+
+**Réglage VirtualBox :** Paramètres de chaque VM → Réseau → Carte 2 → Réseau privé hôte (host-only) → `vboxnet0`. Si `vboxnet0` n'existe pas : Fichier → Outils → Gestionnaire de réseau → Créer.
+:::
+
+### Plan d'adressage
+
+| VM | Interface | IP | Masque | Remarque |
+|---|---|---|---|---|
+| vm-proxy | enp0s8 | 192.168.56.10 | /24 | IP fixe — point d'entrée HTTPS |
+| vm-backend | enp0s8 | 192.168.56.11 | /24 | IP fixe — backend PHP interne |
+| Machine hôte | vboxnet0 | 192.168.56.1 | /24 | Attribuée automatiquement par VirtualBox |
+
+### Configuration des IPs fixes
+
+**Sur vm-proxy et vm-backend**, éditer `/etc/network/interfaces` :
+
+```bash
+nano /etc/network/interfaces
+```
+
+Contenu pour **vm-proxy** (remplacer `.10` par `.11` pour vm-backend) :
+
+```
+# Interface NAT — DHCP (laisser tel quel)
+auto enp0s3
+iface enp0s3 inet dhcp
+
+# Interface host-only — IP fixe
+auto enp0s8
+iface enp0s8 inet static
+    address 192.168.56.10
+    netmask 255.255.255.0
+```
+
+```bash
+systemctl restart networking
+
+# Vérifier l'IP
+ip a show enp0s8
+# → inet 192.168.56.10/24 ...
+```
+
+### Vérification de la connectivité
+
+Avant toute installation, vérifier que tout le monde se voit :
+
+```bash
+# Depuis vm-proxy, pinger vm-backend
+ping -c 3 192.168.56.11
+# → 3 packets transmitted, 3 received, 0% packet loss
+
+# Depuis la machine hôte, pinger vm-proxy
+ping -c 3 192.168.56.10
+# → 0% packet loss
+```
+
+::: {.callout-tip}
+**📷 Capture attendue :** sortie des `ping` (vm-proxy → vm-backend et hôte → vm-proxy), montrant 0% de perte.
+:::
+
+::: {.callout-warning}
+**Problème fréquent :** si le ping échoue, vérifier que les deux VMs sont bien attachées au **même réseau host-only** (`vboxnet0`) dans les paramètres VirtualBox (Carte 2), et que les IPs sont bien en `192.168.56.x`.
+:::
+
+::: {.callout-tip}
+**Snapshot conseillé :** l'environnement réseau fonctionne — prenez un snapshot "réseau OK" sur chaque VM avant de passer à l'installation.
+:::
+
+
+## Architecture
+
+### Schéma d'architecture
+
+```{mermaid}
+flowchart TD
+    H(["Machine hôte<br/>navigateur / curl<br/>192.168.56.1"]) -->|"HTTPS :443 / HTTP :80"| P
+    subgraph HO["Réseau host-only vboxnet0 — 192.168.56.0/24"]
+        P["vm-proxy — HAProxy<br/>Debian 12<br/>192.168.56.10<br/>ports 80, 443, 8404"]
+        B["vm-backend — Apache2 + PHP 8.2<br/>Debian 12<br/>192.168.56.11<br/>port 8080 (filtré nftables)"]
+        P -->|"HTTP :8080"| B
+    end
+    style P fill:#69b,stroke:#333,color:#fff
+    style B fill:#6a9,stroke:#333,color:#fff
+```
+
+### Tableau des composants
+
+| Composant | VM | IP | Port(s) | Rôle |
+|---|---|---|---|---|
+| HAProxy | vm-proxy | 192.168.56.10 | 80, 443 (public) / 8404 (stats) | Reverse proxy, terminaison TLS |
+| Apache2 + PHP 8.2 | vm-backend | 192.168.56.11 | 8080 (filtré) | Serveur applicatif PHP |
+
+::: {.callout-note}
+Le port 8080 du backend n'est accessible que depuis l'IP de vm-proxy (règle nftables). Depuis l'hôte ou toute autre machine, seuls les ports 80, 443 et 8404 de vm-proxy répondent.
+:::
+
+
+## Diagramme au choix
+
+Nous avons choisi un **diagramme de séquence** : il montre le cheminement complet d'une requête HTTPS dans le temps, ce que le schéma d'architecture (vue statique) ne peut pas exprimer.
+
+```{mermaid}
+sequenceDiagram
+    participant C as Client (hôte 192.168.56.1)
+    participant P as vm-proxy (HAProxy)
+    participant B as vm-backend (Apache/PHP)
+
+    C->>P: HTTPS GET / (handshake TLS)
+    Note over P: Terminaison TLS<br/>déchiffrement
+    P->>B: HTTP GET /<br/>+ X-Forwarded-For: 192.168.56.1<br/>+ X-Forwarded-Proto: https
+    Note over B: Exécution index.php
+    B-->>P: HTTP 200 OK (HTML)
+    Note over P: Ajout en-têtes sécurité<br/>HSTS, X-Frame-Options...
+    P-->>C: HTTPS 200 OK
+```
+
+Ce diagramme apprend deux choses invisibles sur le schéma d'architecture :
+
+1. **La terminaison TLS se fait côté HAProxy** : le backend ne voit jamais de trafic chiffré, il reçoit du HTTP simple.
+2. **L'IP réelle du client est transmise** via l'en-tête `X-Forwarded-For` : sans cette mécanique, le backend enregistrerait systématiquement l'IP de HAProxy (`192.168.56.10`) dans ses logs, rendant le débogage et l'analyse d'accès impossibles.
+
+
+## Installation et déploiement
+
+### Prérequis
+
+- [ ] VMs créées et configurées selon la section "Configuration réseau VirtualBox"
+- [ ] Ping fonctionnel : vm-proxy ↔ vm-backend et hôte → VMs
+- [ ] Snapshot "réseau OK" pris sur chaque VM
+- [ ] Accès root sur les deux VMs
+- [ ] Mises à jour effectuées sur les deux VMs :
+
+```bash
+apt update && apt upgrade -y
+```
+
+### Installation du backend PHP (sur vm-backend)
+
+**Pourquoi :** le backend est le serveur applicatif qui exécute réellement le code PHP. On le fait écouter sur le port 8080 (et non 80) pour bien distinguer le rôle "applicatif interne" du rôle "exposition publique" tenu par le proxy.
+
+```bash
+# Installation d'Apache2 et PHP
+apt install -y apache2 php libapache2-mod-php
+
+# Faire écouter Apache sur le port 8080 (interne) et non 80
+sed -i 's/^Listen 80$/Listen 8080/' /etc/apache2/ports.conf
+sed -i 's/<VirtualHost \*:80>/<VirtualHost *:8080>/' \
+    /etc/apache2/sites-available/000-default.conf
+
+# Créer une page PHP de test
+cat > /var/www/html/index.php << 'EOF'
+<?php
+echo "<h1>Hello from PHP Backend !</h1>";
+echo "<p>IP du proxy : " . $_SERVER['REMOTE_ADDR'] . "</p>";
+echo "<p>IP réelle client : " . ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? 'non transmise') . "</p>";
+echo "<p>Protocole : " . ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? 'non transmis') . "</p>";
+phpinfo();
+EOF
+
+# Fichier de healthcheck pour HAProxy (répond 200 sans redirection)
+echo '<?php http_response_code(200); echo "OK"; ?>' > /var/www/html/health.php
+
+# Redémarrer Apache
+systemctl restart apache2
+systemctl enable apache2
+```
+
+**Vérification (sur vm-backend) :**
+
+```bash
+curl http://localhost:8080/health.php
+# → OK
+
+curl http://localhost:8080/ | head -5
+# → <h1>Hello from PHP Backend !</h1> ...
+```
+
+### Génération du certificat TLS (sur vm-proxy)
+
+**Pourquoi :** HAProxy assure la terminaison TLS ; il lui faut donc un certificat. En labo, un certificat auto-signé suffit pour démontrer le chiffrement (en production, on utiliserait Let's Encrypt).
+
+```bash
+apt install -y openssl
+
+# Créer le répertoire pour les certificats
+mkdir -p /etc/haproxy/certs
+
+# Générer le certificat auto-signé (valable 365 jours)
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /etc/haproxy/certs/monsite.key \
+    -out    /etc/haproxy/certs/monsite.crt \
+    -subj "/C=BE/ST=Bruxelles/L=Bruxelles/O=Labo/CN=monsite.local"
+
+# HAProxy exige un fichier PEM unique : certificat + clé concaténés
+cat /etc/haproxy/certs/monsite.crt \
+    /etc/haproxy/certs/monsite.key \
+    > /etc/haproxy/certs/monsite.pem
+
+chmod 600 /etc/haproxy/certs/monsite.pem
+```
+
+**Vérification :**
+
+```bash
+# Le fichier PEM doit contenir deux blocs : le certificat et la clé
+grep -c "BEGIN" /etc/haproxy/certs/monsite.pem
+# → 2
+```
+
+### Installation et configuration de HAProxy (sur vm-proxy)
+
+**Pourquoi :** c'est le cœur du projet — HAProxy reçoit le trafic HTTPS, le déchiffre, ajoute les en-têtes utiles et le transmet au backend en surveillant sa santé (healthcheck).
+
+```bash
+apt update
+apt install -y haproxy
+```
+
+Éditer `/etc/haproxy/haproxy.cfg` (remplacer le contenu existant) :
+
+```bash
+nano /etc/haproxy/haproxy.cfg
+```
+
+```haproxy
+#---------------------------------------------------------------------
+# Global
+#---------------------------------------------------------------------
+global
+    log /dev/log local0
+    log /dev/log local1 notice
+    chroot /var/lib/haproxy
+    stats socket /run/haproxy/admin.sock mode 660 level admin expose-fd listeners
+    stats timeout 30s
+    user haproxy
+    group haproxy
+    daemon
+
+    # TLS : interdire les versions obsolètes, imposer TLS 1.2 minimum
+    ssl-default-bind-ciphers ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256
+    ssl-default-bind-options ssl-min-ver TLSv1.2 no-tls-tickets
+
+#---------------------------------------------------------------------
+# Defaults
+#---------------------------------------------------------------------
+defaults
+    log     global
+    mode    http
+    option  httplog
+    option  dontlognull
+    timeout connect 5s
+    timeout client  30s
+    timeout server  30s
+    errorfile 400 /etc/haproxy/errors/400.http
+    errorfile 403 /etc/haproxy/errors/403.http
+    errorfile 408 /etc/haproxy/errors/408.http
+    errorfile 500 /etc/haproxy/errors/500.http
+    errorfile 502 /etc/haproxy/errors/502.http
+    errorfile 503 /etc/haproxy/errors/503.http
+    errorfile 504 /etc/haproxy/errors/504.http
+
+#---------------------------------------------------------------------
+# Frontend HTTP — redirige tout vers HTTPS
+#---------------------------------------------------------------------
+frontend fe_http
+    bind *:80
+    mode http
+    redirect scheme https code 301
+
+#---------------------------------------------------------------------
+# Frontend HTTPS — point d'entrée principal
+#---------------------------------------------------------------------
+frontend fe_https
+    bind *:443 ssl crt /etc/haproxy/certs/monsite.pem
+    mode http
+
+    # En-têtes de sécurité ajoutés par HAProxy pour tous les backends
+    http-response set-header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+    http-response set-header X-Frame-Options "SAMEORIGIN"
+    http-response set-header X-Content-Type-Options "nosniff"
+
+    # Transmettre l'IP réelle du client et le protocole au backend
+    option forwardfor
+    http-request set-header X-Forwarded-Proto https
+
+    default_backend be_php
+
+#---------------------------------------------------------------------
+# Backend PHP
+#---------------------------------------------------------------------
+backend be_php
+    mode http
+    balance roundrobin
+    # Healthcheck sur /health.php (évite les faux positifs avec /index.php)
+    option httpchk GET /health.php
+    http-check expect string OK
+
+    server php-backend-1 192.168.56.11:8080 check inter 5s rise 2 fall 3
+
+#---------------------------------------------------------------------
+# Page de statistiques HAProxy
+#---------------------------------------------------------------------
+frontend stats
+    bind *:8404
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+    stats auth admin:motdepasse_fort
+    stats admin if TRUE
+```
+
+**Vérification syntaxique et redémarrage :**
+
+```bash
+# Vérifier la syntaxe avant de redémarrer
+haproxy -c -f /etc/haproxy/haproxy.cfg
+# → Configuration file is valid
+
+systemctl restart haproxy
+systemctl enable haproxy
+systemctl status haproxy
+# → Active: active (running)
+```
+
+::: {.callout-tip}
+**📷 Capture attendue :** sortie de `systemctl status haproxy` montrant `active (running)`.
+:::
+
+### Résolution de nom (sur vm-proxy et machine hôte)
+
+**Pourquoi :** le certificat a été émis pour `monsite.local` ; pour que les tests utilisent ce nom (et non l'IP brute), il faut le faire résoudre vers vm-proxy.
+
+```bash
+# Sur vm-proxy
+echo "192.168.56.10  monsite.local" >> /etc/hosts
+```
+
+Sur la **machine hôte** (pour tester depuis le navigateur) :
+
+- **Linux/macOS :** `echo "192.168.56.10  monsite.local" | sudo tee -a /etc/hosts`
+- **Windows :** éditer `C:\Windows\System32\drivers\etc\hosts` en administrateur et ajouter la ligne `192.168.56.10  monsite.local`
+
+### Configuration du firewall sur vm-backend
+
+**Pourquoi :** sans firewall, n'importe quelle machine du réseau host-only (dont l'hôte) pourrait joindre directement le backend en HTTP non chiffré, en contournant HAProxy. On restreint le port 8080 à la seule IP du proxy.
+
+```bash
+apt install -y nftables
+
+cat > /etc/nftables.conf << 'EOF'
+#!/usr/sbin/nft -f
+flush ruleset
+
+table inet filter {
+    chain input {
+        type filter hook input priority 0; policy drop;
+
+        # Loopback toujours autorisé
+        iif "lo" accept
+
+        # Connexions établies
+        ct state established,related accept
+
+        # SSH (administration)
+        tcp dport 22 accept
+
+        # Port 8080 : uniquement depuis vm-proxy
+        tcp dport 8080 ip saddr 192.168.56.10 accept
+    }
+    chain output {
+        type filter hook output priority 0; policy accept;
+    }
+}
+EOF
+
+systemctl enable nftables
+systemctl restart nftables
+```
+
+**Vérification :**
+
+```bash
+# Depuis vm-backend : le backend répond toujours en local
+curl http://localhost:8080/health.php
+# → OK
+
+# Depuis vm-proxy : doit fonctionner
+curl http://192.168.56.11:8080/health.php
+# → OK
+```
+
+
+## Vérification et tests
+
+### Tableau récapitulatif des tests
+
+| # | Test | Commande / Action | Résultat attendu | Résultat obtenu | ✅/❌ |
+|---|---|---|---|---|---|
+| 1 | Accès HTTPS depuis l'hôte | `curl -k https://monsite.local/` | Page PHP affichée | Page PHP | ✅ |
+| 2 | Redirection HTTP→HTTPS | `curl -I http://monsite.local/` | `301 Moved Permanently` | 301 | ✅ |
+| 3 | En-têtes de sécurité | `curl -kI https://monsite.local/` | HSTS + X-Frame + X-Content | Présents | ✅ |
+| 4 | X-Forwarded-For | Navigateur hôte → page PHP | IP client = 192.168.56.1 | 192.168.56.1 | ✅ |
+| 5 | Page de stats HAProxy | Navigateur → `:8404/stats` | Backend UP en vert | UP | ✅ |
+| 6 | Panne simulée | `systemctl stop apache2` sur backend | `503 Service Unavailable` | 503 | ✅ |
+| 7 | Sécurité négative : backend isolé | `curl http://192.168.56.11:8080/` depuis l'hôte | Timeout / refus | Timeout | ✅ |
+
+### Test 1 — Accès HTTPS depuis la machine hôte
+
+```bash
+# Depuis la machine hôte (le -k ignore l'avertissement du certificat auto-signé)
+curl -k https://monsite.local/
+# → <h1>Hello from PHP Backend !</h1>
+# → <p>IP réelle client : 192.168.56.1</p>
+# → <p>Protocole : https</p>
+```
+
+::: {.callout-tip}
+**📷 Capture :** sortie `curl` montrant la page PHP avec les en-têtes transmis.
+:::
+
+### Test 2 — Redirection HTTP → HTTPS
+
+```bash
+curl -I http://monsite.local/
+# → HTTP/1.1 301 Moved Permanently
+# → Location: https://monsite.local/
+```
+
+::: {.callout-tip}
+**📷 Capture :** en-tête HTTP `301` avec `Location: https://...`.
+:::
+
+### Test 3 — En-têtes de sécurité
+
+```bash
+curl -kI https://monsite.local/ | grep -iE "strict-transport|x-frame|x-content"
+# → strict-transport-security: max-age=63072000; includeSubDomains; preload
+# → x-frame-options: SAMEORIGIN
+# → x-content-type-options: nosniff
+```
+
+::: {.callout-tip}
+**📷 Capture :** les trois en-têtes présents dans la réponse.
+:::
+
+### Test 4 — Vérification du X-Forwarded-For
+
+Ouvrir `https://monsite.local/` dans un **navigateur sur la machine hôte** (accepter l'avertissement du certificat auto-signé). La page PHP doit afficher :
+
+```
+IP du proxy       : 192.168.56.10    ← REMOTE_ADDR vu par Apache
+IP réelle client  : 192.168.56.1     ← X-Forwarded-For ajouté par HAProxy
+Protocole         : https            ← X-Forwarded-Proto
+```
+
+::: {.callout-tip}
+**📷 Capture :** navigateur affichant la page avec les trois valeurs correctes.
+:::
+
+### Test 5 — Page de statistiques HAProxy
+
+Ouvrir dans un navigateur sur l'hôte : `http://192.168.56.10:8404/stats`
+Identifiants : `admin` / `motdepasse_fort`
+
+Le backend `be_php` doit afficher le serveur `php-backend-1` en état **UP** (pastille verte).
+
+::: {.callout-tip}
+**📷 Capture :** page de stats HAProxy avec le backend en vert.
+:::
+
+### Test 6 — Simulation de panne backend (obligatoire)
+
+```bash
+# Sur vm-backend : arrêter Apache
+systemctl stop apache2
+
+# Depuis l'hôte : HAProxy doit renvoyer 503
+curl -k https://monsite.local/
+# → <html><body><h1>503 Service Unavailable</h1>...
+
+# Vérifier dans les stats HAProxy : le backend passe en rouge
+# Navigateur → http://192.168.56.10:8404/stats
+
+# Remettre le backend en marche
+systemctl start apache2
+```
+
+::: {.callout-tip}
+**📷 Capture :** (1) sortie `curl` avec erreur 503, (2) page de stats avec backend en rouge.
+:::
+
+### Test 7 — Test de sécurité négatif : isolation du backend (obligatoire)
+
+**Ce test prouve qu'un accès interdit échoue réellement :** le backend ne doit pas être joignable directement, même depuis la machine hôte qui est pourtant sur le même réseau host-only.
+
+```bash
+# Depuis la machine hôte, tenter d'accéder directement au backend
+curl --connect-timeout 5 http://192.168.56.11:8080/
+# → curl: (28) Connection timed out  ← le firewall nftables bloque bien
+```
+
+::: {.callout-tip}
+**📷 Capture :** timeout confirmant que le backend est inaccessible directement.
+:::
+
+
+## Problèmes rencontrés
+
+**1. Format du certificat PEM pour HAProxy**
+
+*Symptôme :* HAProxy refusait de démarrer avec l'erreur `SSL_CTX_use_certificate_file('/etc/haproxy/certs/monsite.crt'): error`.
+
+*Cause :* HAProxy attend un fichier `.pem` **unique** contenant le certificat **et** la clé privée concaténés dans cet ordre. Fournir uniquement le `.crt` ne suffit pas.
+
+*Solution :* `cat monsite.crt monsite.key > monsite.pem`. L'ordre est important : certificat en premier, clé en second.
+
+---
+
+**2. Apache écoutait toujours sur le port 80 après modification**
+
+*Symptôme :* `curl http://localhost:8080/` retournait une erreur 404 malgré la modification de `ports.conf`.
+
+*Cause :* deux fichiers contrôlent le port d'écoute d'Apache : `ports.conf` (déclaration globale) **et** la directive `<VirtualHost *:80>` dans le fichier de site. Modifier uniquement `ports.conf` ne suffit pas.
+
+*Solution :* modifier également `000-default.conf` pour remplacer `<VirtualHost *:80>` par `<VirtualHost *:8080>`, puis `systemctl restart apache2`.
+
+---
+
+**3. Le healthcheck HAProxy échouait avec `/index.php`**
+
+*Symptôme :* HAProxy marquait le backend comme DOWN alors qu'Apache fonctionnait. Les logs montraient `Health check for server be_php/php-backend-1 failed`.
+
+*Cause :* `option httpchk GET /index.php` attendait un code 200, mais la page `phpinfo()` très volumineuse provoquait un timeout de lecture côté healthcheck.
+
+*Solution :* créer un fichier `/var/www/html/health.php` minimal retournant uniquement `OK`, et utiliser `http-check expect string OK` dans la configuration HAProxy.
+
+---
+
+**4. La machine hôte ne joignait pas les VMs**
+
+*Symptôme :* le `ping 192.168.56.10` depuis l'hôte échouait, alors que les VMs se pinguaient entre elles.
+
+*Cause :* les VMs étaient configurées en **réseau interne** (`intnet`) au lieu de **host-only**. Le réseau interne isole les VMs de l'hôte par conception.
+
+*Solution :* basculer la Carte 2 de chaque VM sur **Réseau privé hôte (host-only)** `vboxnet0` dans VirtualBox, et vérifier que l'hôte possède bien l'IP `192.168.56.1` (`ip a` sur Linux/macOS, `ipconfig` sur Windows).
+
+
+## Distribution des tâches
+
+| Membre | Tâches réalisées |
+|---|---|
+| Prénom Nom 1 | Installation et configuration HAProxy, génération certificat TLS |
+| Prénom Nom 2 | Configuration backend Apache + PHP, firewall nftables |
+| Prénom Nom 3 | Tests et validation, captures d'écran, section Sécurité |
+| Prénom Nom 4 | Documentation, diagrammes, relecture et mise en forme |
+
+
+## Améliorations possibles
+
+- **Haute disponibilité HAProxy :** déployer deux instances HAProxy avec **Keepalived** (VRRP) pour avoir une IP virtuelle flottante. Si le HAProxy principal tombe, le secondaire prend le relais automatiquement sans interruption de service.
+- **Plusieurs backends PHP :** ajouter un second serveur dans `be_php` pour la vraie répartition de charge. HAProxy distribuerait les requêtes en round-robin entre les deux backends.
+- **Certificat Let's Encrypt :** remplacer le certificat auto-signé par `certbot --standalone`, et automatiser le renouvellement avec un hook `deploy-hook` qui recrée le `.pem` et recharge HAProxy. Nécessite un nom de domaine public.
+- **Chiffrement du lien interne :** configurer HAProxy en mode `ssl` vers le backend pour chiffrer aussi le trafic HTTP interne entre proxy et backend.
+- **WAF :** intégrer ModSecurity devant Apache pour filtrer les attaques applicatives (injections SQL, XSS) avant qu'elles atteignent le code PHP.
+- **Monitoring :** exposer les métriques HAProxy au format Prometheus et les visualiser dans Grafana avec des alertes sur le statut des backends.
+
+
+## Conclusion
+
+Ce projet nous a permis de mettre en œuvre une architecture **reverse proxy HTTPS** complète avec HAProxy devant un backend PHP. Nous avons couvert l'ensemble de la chaîne : configuration réseau VirtualBox (host-only), génération du certificat TLS, configuration de HAProxy (frontend/backend, healthchecks, en-têtes de sécurité, redirection HTTP→HTTPS), isolation réseau via nftables, et validation par sept tests documentés — dont le test de panne et le test de sécurité négatif obligatoires.
+
+Les principales difficultés ont été le format PEM attendu par HAProxy et la distinction entre réseau interne et host-only dans VirtualBox — deux points qui bloquent souvent en début de projet.
+
+Ce projet illustre concrètement un principe fondamental des architectures web modernes : séparer la responsabilité TLS de la logique applicative. Le backend PHP n'a aucune connaissance de la couche réseau qui le protège, ce qui facilite la maintenance, la scalabilité et la sécurité.
+

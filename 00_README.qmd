@@ -1,0 +1,218 @@
+---
+title: "Projet - README"
+subtitle: "Cours Administration & Infrastructure"
+author: "Olivier Choquet"
+date: today
+format:
+  html:
+    code-copy: true
+    toc: true
+    toc-depth: 2
+    toc-title: "Sommaire"
+    theme: cosmo
+    highlight-style: github
+lang: fr
+---
+
+# Présentation
+
+**Objectif du projet :** produire une **documentation technique reproductible** pour un sujet d'infrastructure de votre choix. Toute personne disposant de VirtualBox et de vos instructions doit pouvoir remonter votre solution de zéro, sans deviner ni improviser. Savoir documenter de façon claire, complète et testée est une compétence centrale de l'administrateur système — c'est elle qui est évaluée ici, autant que la solution technique elle-même.
+
+**Contrainte technique :** le projet doit être entièrement réalisable en **machines virtuelles Debian sous VirtualBox** (éventuellement avec des conteneurs Docker *à l'intérieur* des VMs). Pas de cloud, pas de matériel dédié, pas d'autre hyperviseur : c'est ce qui garantit que votre documentation est reproductible par n'importe qui — y compris par le correcteur.
+
+Ce dossier contient un template de documentation prêt à l'emploi pour votre
+projet de cours. Il est conçu pour produire un **document HTML interactif**
+avec blocs de commandes copiables, table des matières et
+diagrammes d'architecture. **Ce template utilise les technologies Quarto et Markdown**.
+
+::: {.callout-important title="Utilisation de l'IA"}
+L'utilisation d'un assistant IA (ChatGPT, Claude, Copilot...) est **autorisée** pour vous aider à concevoir, déboguer ou rédiger. Mais attention :
+
+- **Vérifiez fonctionnellement tout ce que l'IA produit** : chaque commande doit être réellement exécutée et testée dans vos VMs. L'IA génère régulièrement des commandes obsolètes, des chemins incorrects ou des configurations qui ne fonctionnent pas telles quelles.
+- **Vérifiez les explications** : l'IA peut affirmer avec assurance des choses fausses ou approximatives. Vous devez être capable d'expliquer et de défendre chaque phrase de votre document.
+
+Un document dont les commandes ne fonctionnent pas ou dont les explications sont erronées sera sanctionné, que l'erreur vienne de vous ou d'une IA. C'est vous qui remettez le travail, c'est vous qui en êtes responsables.
+:::
+
+::: {.callout-note title="Pourquoi un document Quarto & Markdown ?"}
+Avantages de Quarto & Markdown :
+
+  - Reproductible : code + résultats toujours synchronisés, pas de copier-coller manuel, facilité pour copier/coller des commandes
+  - Multi-format : un seul fichier → HTML, PDF, Word, slides, sites web
+  - Multi-langage : R, Python, Julia, Observable JS dans un même document
+Gratuit et open source
+  - Compatible Git : bon suivi de version, travail en équipe facilité
+  - Automatisable : rendu automatique via CI/CD quand les données changent
+  - Qualité pro : mise en page soignée, citations, bibliographie, thèmes personnalisables
+  - Polyvalent : rapports, docs techniques, présentations, dashboards, sites, articles scientifiques
+:::
+
+
+# Structure
+
+```
+template-project/
+├── 00_README.qmd                                 ← ce fichier
+├── 01_project_validation_form.qmd                ← fiche à compléter et soumettre AVANT de commencer
+├── 02_installation_getstarted.qmd                ← guide d'installation de Quarto + VS Code et prise en main
+├── 03_template_project.qmd                       ← template vierge à copier pour votre projet
+├── 04_sample_project_haproxy_reverseproxy.qmd    ← exemple complet
+└── images/                                       ← dossier pour vos captures et schémas
+```
+
+# Choix du sujet du projet
+
+Le choix du sujet du projet est libre mais doit être soumis sur MooVin.
+Il devra comporter au minimum un élément (souvent technologique) totalement inédit.
+
+**Avant de soumettre, je vous conseille de discuter avec Mr Choquet pour qu'il évalue l'ampleur et la complexité du projet et vous donne son feu-vert.**
+
+**La note sera notamment dépendante du niveau de difficulté validée par Mr Choquet.**
+
+| Niveau de difficulté estimée | Note estimée |
+|---|---|
+| ⭐ facile | 10 |
+| ⭐⭐ intermédiaire | 12 |
+| ⭐⭐⭐ avancé | 14 |
+| ⭐⭐⭐⭐ expert | 16 |
+
+**Bien sûr, il s'agit d'une note estimée si le travail correspond aux attentes. Si celles-ci sont en dessous ou au-dessus, la note peut être revue à la baisse ou à la hausse.**
+
+## Fiche de validation du sujet
+
+Avant de commencer, complétez la fiche fournie dans le fichier **`01_project_validation_form.qmd`** et soumettez-la sur MooVin. Elle reprend : sujet, élément inédit, technologies, infrastructure prévue (VMs, RAM, config réseau, ...) et plan de tests envisagé.
+
+::: {.callout-important title="Conseil"}
+Avant de soumettre votre fiche de validation, discutez-en avec Mr Choquet à une pause.
+Vous le voyez normalement (un peu trop) souvent 😀 !
+:::
+
+
+Le formateur valide (ou ajuste) le sujet et la difficulté estimée. **Ne commencez pas l'installation avant le feu vert.**
+
+## Exemples de sujets pour le projet
+
+Tous les sujets sont réalisables dans des **VMs Debian sous VirtualBox**. Les colonnes "VMs" et "RAM" indiquent le nombre de machines virtuelles à prévoir et la RAM recommandée par VM. La colonne **"Conteneurs"** indique si le sujet peut être réalisé via Docker sur une seule VM. La colonne **"Remarques"** précise les points d'attention propres à chaque sujet.
+
+> **Rappel :** le projet doit comporter au minimum un élément totalement inédit. Pour un sujet proche de l'exemple fourni (HAProxy), assurez-vous d'introduire une variation réelle (autre technologie, fonctionnalité supplémentaire, contexte différent) et non une simple copie adaptée.
+
+### Reverse proxy / Load balancing
+
+| Sujet | Technos principales | Difficulté | VMs | RAM/VM | Conteneurs | Remarques |
+|---|---|---|---|---|---|---|
+| ~~Reverse proxy HTTPS devant un site PHP~~ | HAProxy, Apache/PHP, OpenSSL | ⭐⭐ | 2 | 1 Go | Oui | **Exemple fourni — non disponible**, déjà traité en démonstration |
+| Reverse proxy HTTPS devant une appli Node.js | Nginx, Node.js, Let's Encrypt | ⭐⭐ | 2 | 1 Go | Oui | Très proche de l'exemple fourni — privilégier si le groupe veut comparer Nginx à HAProxy |
+| Load balancing haute disponibilité | HAProxy, Keepalived, 2 backends | ⭐⭐⭐ | 3 | 1 Go | Partiel | Keepalived nécessite des IPs réelles → VMs séparées recommandées |
+| Reverse proxy automatisé avec certificats auto | Traefik, Docker, Let's Encrypt | ⭐⭐⭐ | 1-2 | 2 Go | Oui | Let's Encrypt réel nécessite un nom de domaine public et un port 80/443 accessible depuis Internet ; prévoir un certificat auto-signé en repli pour le réseau de classe |
+
+### Sécurité réseau
+
+| Sujet | Technos principales | Difficulté | VMs | RAM/VM | Conteneurs | Remarques |
+|---|---|---|---|---|---|---|
+| VPN site-à-site | WireGuard | ⭐⭐ | 2 | 1 Go | Non | Nécessite une vraie séparation réseau entre 2 machines |
+| VPN client avec certificats | OpenVPN, PKI | ⭐⭐⭐ | 2 | 1 Go | Non | Gestion de PKI (autorité de certification) à bien documenter |
+| Firewall + anti-bruteforce | nftables, Fail2ban | ⭐⭐ | 1-2 | 1 Go | Non | nftables agit au niveau noyau de la VM hôte, pas conteneurisable |
+| Web Application Firewall | ModSecurity, Nginx/Apache | ⭐⭐⭐ | 1-2 | 1 Go | Oui | Prévoir une appli vulnérable de test (ex: DVWA) pour démontrer le blocage d'attaques |
+
+### Infrastructure / Conteneurisation
+
+| Sujet | Technos principales | Difficulté | VMs | RAM/VM | Conteneurs | Remarques |
+|---|---|---|---|---|---|---|
+| Stack applicative conteneurisée | Docker Compose (app + DB + proxy) | ⭐⭐ | 1 | 2 Go | Oui | Bon sujet d'introduction à Docker pour un groupe peu à l'aise avec les VMs multiples |
+| Cluster Docker Swarm | Docker Swarm, service répliqué | ⭐⭐⭐ | 3 | 1,5 Go | Oui | Possible en mono-VM mais perd l'intérêt pédagogique du clustering ; 3 VMs recommandé |
+| Cluster Kubernetes léger | k3s, déploiement d'une appli web | ⭐⭐⭐⭐ | 1-3 | 2-4 Go | Oui | Le plus exigeant en RAM de la catégorie ; bien tester les ressources hôte avant de valider ce choix |
+
+### IA locale
+
+| Sujet | Technos principales | Difficulté | VMs | RAM/VM | Conteneurs | Remarques |
+|---|---|---|---|---|---|---|
+| Serveur de modèle LLM local | Ollama + petit modèle (Llama 3.2 3B, Phi-3, Mistral 7B quantifié) | ⭐⭐ | 1 | 4-8 Go | Oui | Bon point d'entrée pour découvrir l'IA locale sans complexité réseau |
+| Chatbot local avec interface web | Ollama + Open WebUI | ⭐⭐⭐ | 1-2 | 4-8 Go | Oui | Ajoute une couche d'authentification utilisateur intéressante côté sécurité |
+| API d'inférence + reverse proxy HTTPS | Ollama (ou llama.cpp), HAProxy/Nginx en frontal | ⭐⭐⭐ | 2 | 4-8 Go (IA) / 1 Go (proxy) | Oui | Combine bien avec le sujet "reverse proxy" — bon choix si le groupe veut aller plus loin que l'exemple fourni |
+| RAG local (recherche documentaire augmentée) | Ollama, base vectorielle (Chroma/Qdrant), petit LLM | ⭐⭐⭐⭐ | 1-2 | 6-8 Go | Oui | Sujet le plus avancé de la catégorie, demande de bonnes bases Python/API en plus du sysadmin |
+| Reconnaissance vocale locale | Whisper.cpp (speech-to-text) | ⭐⭐ | 1 | 2-4 Go | Oui | Sujet plus léger en RAM que les LLM texte, bonne option si ressources limitées |
+
+> **Attention RAM/CPU générale (IA locale) :** sans GPU passthrough (rare en VirtualBox), l'inférence tourne sur CPU : prévoir des **modèles quantifiés et de petite taille** (3B-7B paramètres, format GGUF/Q4). Recommander **8 Go RAM alloués à la VM** si l'hôte le permet, et avertir que les réponses seront lentes (quelques tokens/seconde) mais fonctionnelles pour la démonstration. Le but pédagogique reste l'intégration (déploiement, API, sécurisation), pas la performance du modèle.
+
+### Supervision / Logs
+
+| Sujet | Technos principales | Difficulté | VMs | RAM/VM | Conteneurs | Remarques |
+|---|---|---|---|---|---|---|
+| Monitoring infra | Prometheus, Grafana | ⭐⭐⭐ | 2 | 1,5 Go | Oui | Bien choisir des métriques pertinentes (CPU, RAM, requêtes HTTP) plutôt qu'un dashboard générique |
+| Centralisation de logs | Loki + Grafana | ⭐⭐⭐ | 2 | 1,5 Go | Oui | Préférer Loki à ELK/Elasticsearch, nettement plus lourd en RAM pour un usage en VM |
+| Supervision réseau classique | Zabbix ou Nagios | ⭐⭐ | 2 | 1,5 Go | Oui | Bien définir des seuils d'alerte réalistes pour la démonstration |
+
+### Stockage / Bases de données
+
+| Sujet | Technos principales | Difficulté | VMs | RAM/VM | Conteneurs | Remarques |
+|---|---|---|---|---|---|---|
+| Réplication de base de données | MySQL ou PostgreSQL (maître-esclave) | ⭐⭐⭐ | 2 | 1 Go | Oui | Conteneurisable sur 1 VM mais 2 VMs illustrent mieux la réplication réseau réelle |
+| NAS maison | Samba, NFS, gestion des permissions | ⭐⭐ | 1-2 | 1 Go | Partiel | Possible en conteneur mais perd l'intérêt pédagogique des permissions système Linux |
+| Sauvegardes automatisées | Restic ou BorgBackup | ⭐⭐ | 2 | 1 Go | Oui | Bien définir un scénario de restauration testé, pas seulement la sauvegarde |
+
+### Authentification / Annuaire
+
+| Sujet | Technos principales | Difficulté | VMs | RAM/VM | Conteneurs | Remarques |
+|---|---|---|---|---|---|---|
+| Annuaire d'entreprise | Samba AD / LDAP | ⭐⭐⭐ | 2 | 1,5 Go | Non | Samba AD se comporte mal en conteneur (DNS, Kerberos) — VMs classiques requises |
+| SSO centralisé | Keycloak | ⭐⭐⭐⭐ | 1-2 | 2 Go | Oui | Démarrage en mode développement rapide, mais prévoir du temps pour la configuration "production" (HTTPS, base externe) |
+| Authentification réseau Wi-Fi | Serveur RADIUS | ⭐⭐⭐ | 2 | 1 Go | Oui (serveur) | Un vrai point d'accès/client Wi-Fi reste préférable pour des tests convaincants |
+
+### Mail / DNS
+
+| Sujet | Technos principales | Difficulté | VMs | RAM/VM | Conteneurs | Remarques |
+|---|---|---|---|---|---|---|
+| Serveur mail complet | Postfix, Dovecot, SPF/DKIM/DMARC | ⭐⭐⭐⭐ | 1-2 | 1 Go | Oui | Tester l'envoi/réception en interne (pas de vrai domaine public) pour éviter d'être bloqué comme spam |
+| DNS sécurisé | BIND9, DNSSEC | ⭐⭐⭐ | 1-2 | 1 Go | Oui | DNSSEC ajoute une vraie complexité (clés, signatures) — bon sujet pour un groupe motivé |
+| DNS interne avec filtrage | Pi-hole | ⭐ | 1 | 512 Mo - 1 Go | Oui | Sujet le plus accessible de la liste, bon choix pour un groupe débutant |
+
+### CI/CD / DevOps
+
+| Sujet | Technos principales | Difficulté | VMs | RAM/VM | Conteneurs | Remarques |
+|---|---|---|---|---|---|---|
+| Pipeline CI/CD | GitLab CI ou Jenkins | ⭐⭐ | 2 | 2 Go | Oui (partiel) | Le runner/serveur CI peut être conteneurisé, mais garder un second hôte de déploiement séparé pour illustrer le flux complet |
+| Registry Docker privé sécurisé | Harbor + scan de vulnérabilités | ⭐⭐⭐⭐ | 1 | 2-4 Go | Oui | Plusieurs services internes (DB, registry, UI) — bien vérifier la RAM disponible avant validation |
+
+---
+
+**Légende difficulté :** ⭐ facile · ⭐⭐ intermédiaire · ⭐⭐⭐ avancé · ⭐⭐⭐⭐ expert
+
+
+# Composition des groupes
+
+Sur MooVin.
+
+
+# Remise
+
+Remise du fichier .qmd sur MooVin (1 soumission par groupe).
+
+N'oubliez pas de joindre le dossier `images/` avec vos captures d'écran si vous en utilisez (ou remettez une archive zip contenant le `.qmd` + `images/`).
+
+
+# Evaluation
+
+Le projet compte pour 20% des points de la note finale de l'UE Administration Infrastructure.
+L'examen compte pour 80% des points restants.
+
+Le projet se fait en groupe de 4 ou 5 personnes maximum.
+
+## Grille d'évaluation du projet
+
+Savoir documenter est une compétence importante d'un administrateur système. C'est un des objectifs assumés
+de ce projet.
+
+| Critère | Ce qui est évalué |
+|---|---|
+| **Niveau de difficulté** | Ambition et complexité du sujet validé (cf. barème ⭐) |
+| **Installation reproductible** | Étapes complètes, commandes testées, VM cible indiquée, vérification après chaque étape |
+| **Tests et preuves** | Tableau de tests complété, captures/sorties présentes |
+| **Clarté et lisibilité** | Fil conducteur, explications précises et concises, orthographe |
+| **Diagrammes** | Pertinence, choix du diagramme au choix, complétude (IPs, ports, flux), explications textuelles |
+| **Recul critique** | Problèmes rencontrés authentiques, améliorations concrètes, conclusion |
+| **Respect des consignes** | Template utilisé, consignes supprimées, plan d'adressage respecté, remise à temps |
+| **Total** | | **/20** |
+
+::: {.callout-note}
+**Sur l'usage des assistants IA :** utiliser une IA pour vous aider à comprendre, déboguer ou améliorer votre rédaction est autorisé. En revanche, votre documentation doit refléter ce que **vous avez réellement fait et testé** dans vos VMs. La section "Problèmes rencontrés" (symptôme / cause / solution) et les captures d'écran de **votre** environnement en sont les preuves : un document généré sans manipulation réelle se repère immédiatement (IPs incohérentes, sorties de commandes génériques, problèmes "trop propres") et sera sanctionné.
+:::
