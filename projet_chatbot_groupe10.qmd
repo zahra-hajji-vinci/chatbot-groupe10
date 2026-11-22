@@ -47,7 +47,7 @@ lang: fr
 
 ### Objectif
 
-Ce projet met en place un **chatbot fonctionnant entièrement en local**, dans une machine virtuelle Debian 13 sous VirtualBox. Un utilisateur ouvre `https://chatbot.local` dans son navigateur, se connecte avec un compte, pose une question, et un modèle de langage installé sur la VM lui répond, sans qu'aucune donnée ne quitte la machine.
+Ce projet met en place un **chatbot fonctionnant entièrement en local**, dans une machine virtuelle Debian 13 sous VirtualBox. Un utilisateur ouvre `https://chatbot.local` dans son navigateur, se connecte avec un compte, pose une question, et un modèle de langage installé sur la VM lui répond, sans que les questions soient envoyées à un service d'IA externe.
 
 La solution assemble quatre briques :
 
@@ -62,7 +62,7 @@ La solution assemble quatre briques :
 
 Les assistants conversationnels en ligne envoient chaque question vers les serveurs d'un fournisseur externe. Pour une entreprise, ça pose un vrai problème de **confidentialité**, puisque des documents internes, des données clients ou du code source peuvent sortir du réseau. Un modèle de langage hébergé sur un serveur interne règle ce problème, même si ses performances sont plus modestes, surtout sans carte graphique.
 
-Rendre ce service accessible pose ensuite des questions classiques d'administration système. Ollama n'a **aucune authentification**, donc n'importe qui qui atteint son port 11434 peut utiliser le modèle. Et si Open WebUI était exposé directement, il serait servi en HTTP, avec les mots de passe et les conversations en clair sur le réseau. Notre architecture règle ces deux points. Seul Nginx est joignable, en HTTPS. Open WebUI n'écoute qu'en local et demande une connexion. Enfin, le pare-feu empêche d'atteindre Ollama directement. On applique ainsi la règle de sécurité de base vue dans le syllabus (section 2.6), qui consiste à bloquer sur le serveur tous les ports sauf ceux des applications utilisées.
+Rendre ce service accessible pose ensuite des questions classiques d'administration système. Ollama n'a **aucune authentification**, donc toute personne qui atteint son port 11434 peut utiliser le modèle. Et si Open WebUI était exposé directement, il serait servi en HTTP, avec les mots de passe et les conversations en clair sur le réseau. Notre architecture règle ces deux points. Seul Nginx est joignable, en HTTPS. Open WebUI n'écoute qu'en local et demande une connexion. Enfin, le pare-feu empêche d'atteindre Ollama directement. On applique ainsi la règle de sécurité de base vue dans le syllabus (section 2.6), qui consiste à bloquer sur le serveur tous les ports sauf ceux des applications utilisées.
 
 Le projet met aussi en œuvre plusieurs notions du cours :
 
@@ -82,7 +82,7 @@ Le projet met aussi en œuvre plusieurs notions du cours :
 Par rapport au cours, les éléments suivants sont totalement nouveaux :
 
 - **Un modèle de langage local avec Ollama.** Le cours n'aborde ni les modèles de langage ni leur hébergement. Nous avons installé Ollama comme service systemd, choisi un modèle adapté à une VM sans GPU (`llama3.2:1b`, 1 milliard de paramètres) et interrogé son API HTTP.
-- **Nginx comme reverse proxy.** Le syllabus le cite comme alternative à Apache (section 6.2), mais les exercices utilisent Apache. Nous avons donc écrit une configuration Nginx complète, avec la redirection HTTP vers HTTPS, la terminaison TLS, le passage des **WebSockets** (indispensables au chat d'Open WebUI) et un délai d'attente allongé à 300 s pour les réponses lentes du modèle.
+- **Nginx comme reverse proxy.** Le syllabus le cite comme alternative à Apache (section 6.2), mais les exercices utilisent Apache. Nous avons donc écrit une configuration Nginx complète, avec la redirection HTTP vers HTTPS, la terminaison TLS, le passage des **WebSockets** (utilisés par Open WebUI pour sa connexion en temps réel avec le navigateur), la transmission des réponses en flux et un délai d'attente allongé à 300 s pour laisser au modèle le temps de commencer à répondre.
 - **Un pare-feu avec nftables.** Le cours énonce le principe « tout bloquer sauf les ports utilisés », mais ne présente pas d'outil de pare-feu. Nous avons écrit des règles nftables qui cohabitent avec celles que Docker crée lui-même, en évitant la directive `flush ruleset` qui les effacerait.
 - **La communication entre un conteneur et un service de la VM.** Pour qu'Open WebUI atteigne Ollama, il a fallu comprendre que `127.0.0.1` désigne le conteneur lui-même et non la VM, modifier l'adresse d'écoute d'Ollama par un fichier de surcharge systemd, puis restreindre le port 11434 à l'interface Docker `docker0` dans le pare-feu.
 
@@ -90,16 +90,34 @@ Par rapport au cours, les éléments suivants sont totalement nouveaux :
 
 La procédure de ce document a été réalisée sur un PC **Windows**, avec VirtualBox. Les commandes à taper sur la machine hôte sont donc données pour PowerShell, et les captures viennent de ce PC.
 
-Deux membres du groupe ont aussi refait l'installation sur **Mac** (puce Apple). La plupart des commandes sont les mêmes, puisqu'elles se tapent dans la VM Debian. Quand quelque chose change sur Mac, un encadré « Sur Mac » indique quoi modifier à cet endroit de la procédure (noms des cartes réseau, architecture ARM, commandes du Terminal, fichier hosts).
+Deux membres du groupe ont aussi refait l'installation sur **Mac**, avec une VM en ARM. La plupart des commandes sont les mêmes, puisqu'elles se tapent dans la VM Debian. Quand quelque chose change sur Mac, un encadré « Sur Mac » indique quoi modifier à cet endroit de la procédure (noms des cartes réseau, architecture ARM, commandes du Terminal, fichier hosts).
 
 
 ## Configuration réseau VirtualBox
 
 ### VM créée
 
-| Nom de la VM | Rôle | OS | RAM allouée | Processeurs | Disque |
-|---|---|---|---|---|---|
-| vm-chatbot | Serveur du chatbot (Ollama, Open WebUI, Nginx, pare-feu) | Debian 13 Trixie (64-bit) | 8192 Mo | 4 | 40 Gio (`vm-chatbot.vdi`) |
+**Logiciels utilisés :** VirtualBox **7.2.16** sous Windows, et l'image d'installation `debian-13.7.0-amd64-netinst.iso` téléchargée sur debian.org (sur Mac, il faut la version `arm64` de la même image).
+
+![Version de VirtualBox utilisée](images/01-vbox-version.png){width=70%}
+
+**Création de la VM dans VirtualBox** (**Machine → Nouvelle**) :
+
+| Nom de la VM | Type | RAM allouée | Processeurs | Disque |
+|---|---|---|---|---|
+| vm-chatbot | Linux, Debian (64-bit) | 8192 Mo | 4 | VDI de 40 Gio à allocation dynamique (`vm-chatbot.vdi`) |
+
+À allocation dynamique, le fichier du disque ne prend de la place sur la machine hôte qu'au fur et à mesure qu'on écrit dedans (voir le problème 3).
+
+**Choix faits dans l'installeur Debian :**
+
+| Étape de l'installeur | Choix | Remarque |
+|---|---|---|
+| Nom de machine | `chatbot10` | Différent du nom `vm-chatbot` donné dans VirtualBox. C'est ce nom qui apparaît dans l'invite `chatbot10@chatbot10` |
+| Mot de passe root | Défini | Debian n'installe alors pas `sudo`. C'est pour cela qu'on passe par `su -` puis qu'on installe `sudo` à la main plus loin |
+| Utilisateur | `chatbot10` | Utilisé pour toutes les connexions SSH |
+| Interface réseau principale | `enp0s3` | La carte NAT, la seule que l'installeur configure |
+| Logiciels | Utilitaires usuels du système, **sans** environnement graphique et **sans** serveur SSH | La VM est un serveur sans écran, et le serveur SSH est installé ensuite à la main |
 
 ::: {.callout-tip}
 **📷 Capture :** page Détails de la VM dans VirtualBox.
@@ -117,13 +135,17 @@ La VM dispose de **deux interfaces réseau** dans VirtualBox, toutes deux de typ
 | Interface 2 | `enp0s8` | Réseau privé hôte (host-only), `VirtualBox Host-Only Ethernet Adapter` | Communication entre la machine hôte et la VM (SSH, HTTPS) |
 
 ::: {.callout-note}
-**Pourquoi deux cartes ?** Le NAT donne Internet à la VM, mais la machine hôte ne peut pas la joindre par ce réseau. Le réseau privé hôte (host-only) crée le réseau `192.168.56.0/24`, partagé entre la VM et la machine hôte. C'est par lui que passent le SSH et l'accès au chatbot depuis le navigateur.
+**Pourquoi deux cartes ?** Le NAT donne Internet à la VM, mais la machine hôte ne peut pas la joindre par ce réseau (sans redirection de ports). Le réseau privé hôte (host-only) crée le réseau `192.168.56.0/24`, partagé entre la VM et la machine hôte. C'est par lui que passent le SSH et l'accès au chatbot depuis le navigateur.
 
 **Réglage VirtualBox :** Configuration de la VM → Réseau → Interface 2 → Réseau privé hôte → `VirtualBox Host-Only Ethernet Adapter`.
 :::
 
+Si le réseau privé hôte n'existe pas encore, on le crée dans VirtualBox avec **Fichier → Outils → Réseau**, onglet **Host-only Networks**, bouton **Créer**. On vérifie ensuite que son préfixe IPv4 est bien `192.168.56.1/24`.
+
+![Réseau privé hôte 192.168.56.1/24 dans VirtualBox](images/01-reseau-hote.png){width=90%}
+
 ::: {.callout-note}
-**Sur Mac (puce Apple, VM en ARM)**, les cartes réseau n'ont pas le même nom dans Debian. Sur nos Mac, la carte NAT s'appelle `enp0s8` et la carte host-only `enp0s9`. On le vérifie avec `ip -br addr` avant de commencer. Dans toute la suite, il faut donc remplacer `enp0s8` par `enp0s9`, et `enp0s3` par `enp0s8`. Les encadrés « Sur Mac » indiquent à chaque fois ce qui change.
+**Sur Mac (VM en ARM)**, les cartes réseau n'ont pas le même nom dans Debian. Sur nos Mac, la carte NAT s'appelle `enp0s8` et la carte host-only `enp0s9`. On le vérifie avec `ip -br addr` avant de commencer. Dans toute la suite, il faut donc remplacer `enp0s8` par `enp0s9`, et `enp0s3` par `enp0s8`. Les encadrés « Sur Mac » indiquent à chaque fois ce qui change.
 :::
 
 ### Plan d'adressage
@@ -132,6 +154,7 @@ La VM dispose de **deux interfaces réseau** dans VirtualBox, toutes deux de typ
 |---|---|---|---|---|
 | vm-chatbot | `enp0s3` | 10.0.2.15 | /24 | Attribuée automatiquement par VirtualBox (DHCP du NAT) |
 | vm-chatbot | `enp0s8` | 192.168.56.10 | /24 | IP fixe — point d'entrée SSH et HTTPS |
+| vm-chatbot | `docker0` | 172.17.0.1 | /16 | Créée par Docker à son installation. C'est l'adresse derrière `host.docker.internal` (voir *Lancement d'Open WebUI*) |
 | Machine hôte | `VirtualBox Host-Only Ethernet Adapter` | 192.168.56.1 | /24 | Attribuée automatiquement par VirtualBox |
 
 ### État initial de la VM
@@ -164,16 +187,19 @@ La carte NAT (`enp0s3`) a reçu son adresse automatiquement, mais la carte host-
 
 **Pourquoi :** tant que la carte host-only n'a pas d'adresse, la machine hôte ne peut pas joindre la VM. On lui donne une adresse **fixe** pour qu'elle ne change jamais, parce que le fichier hosts, le certificat TLS et toute cette documentation reposent sur `192.168.56.10`.
 
-**Sur vm-chatbot** (console VirtualBox), en root :
+**Sur vm-chatbot** (console VirtualBox) :
 
 ```bash
+# Passer en root (mot de passe root défini à l'installation)
 su -
+
+# Ouvrir le fichier de configuration réseau
 nano /etc/network/interfaces
 ```
 
 Ajouter à la fin du fichier, sans toucher à la configuration existante de `enp0s3` :
 
-```
+```text
 auto enp0s8
 iface enp0s8 inet static
     address 192.168.56.10/24
@@ -220,7 +246,7 @@ ip -br addr
 ::: {.callout-note}
 **Sur Mac**, on configure la carte host-only `enp0s9` au lieu de `enp0s8` :
 
-```
+```text
 auto enp0s9
 iface enp0s9 inet static
     address 192.168.56.10/24
@@ -233,7 +259,7 @@ puis on l'active avec `ifup enp0s9`.
 
 **Pourquoi :** le serveur SSH permet d'administrer la VM depuis un terminal de la machine hôte, avec le copier-coller des commandes, plutôt que dans la console VirtualBox. `sudo` permet à l'utilisateur `chatbot10` de lancer une commande en administrateur sans ouvrir de session root. Toutes les étapes suivantes l'utilisent.
 
-**Sur vm-chatbot** (console VirtualBox), toujours en root :
+**Sur vm-chatbot** (console VirtualBox), toujours dans la session root ouverte avec `su -` :
 
 ```bash
 # Mettre à jour la liste des paquets, puis installer les deux programmes
@@ -297,7 +323,17 @@ ssh chatbot10@192.168.56.10
 # → chatbot10@chatbot10:~$
 ```
 
-À la première connexion, SSH affiche l'empreinte de la VM et demande de la confirmer (`yes`). Si un avertissement `REMOTE HOST IDENTIFICATION HAS CHANGED` apparaît à la place, voir le problème 1 de la section « Problèmes rencontrés ».
+À la première connexion, SSH affiche l'empreinte de la VM et demande de la confirmer. Avant de taper `yes`, on compare cette empreinte avec celle de la VM, affichée dans la console VirtualBox. Si les deux sont identiques, on se connecte bien à notre VM.
+
+```bash
+# Sur vm-chatbot (console VirtualBox)
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+# → 256 SHA256:NqfKR9P/aX+jd0ZA77ONzHT62ftNAaAiDedb2L4qLbk root@chatbot10 (ED25519)
+```
+
+![Empreinte de la clé SSH de la VM, dans la console](images/01-empreinte-vm.png){width=90%}
+
+Si un avertissement `REMOTE HOST IDENTIFICATION HAS CHANGED` apparaît à la place, voir le problème 1 de la section « Problèmes rencontrés ».
 
 À partir de cette étape, toutes les commandes « sur vm-chatbot » sont saisies dans cette session SSH.
 
@@ -355,16 +391,17 @@ Toute la solution tient sur une seule VM. Le schéma montre les flux réseau, de
 ```{mermaid}
 flowchart TD
     H(["Machine hôte Windows<br/>192.168.56.1<br/>navigateur, PowerShell"])
-    I[("Internet<br/>via NAT VirtualBox")]
-    subgraph HO["Réseau host-only 192.168.56.0/24"]
-        subgraph VM["vm-chatbot : Debian 13, 192.168.56.10 (enp0s8)"]
+    I[("Internet")]
+    subgraph HO["host-only 192.168.56.0/24"]
+        subgraph VM["vm-chatbot 192.168.56.10"]
             FW{{"Pare-feu nftables<br/>entrée autorisée : 22, 80, 443 sur enp0s8<br/>11434 sur docker0"}}
             S["OpenSSH<br/>:22"]
             N["Nginx<br/>:80 redirection 301<br/>:443 HTTPS"]
-            subgraph DK["Docker"]
+            subgraph DK["docker0 172.17.0.1/16"]
                 W["Conteneur open-webui<br/>:8080, publié sur 127.0.0.1:3000"]
             end
             O["Ollama<br/>:11434<br/>modèle llama3.2:1b"]
+            NAT["Carte NAT enp0s3<br/>10.0.2.15"]
         end
     end
     H -->|"SSH :22"| FW
@@ -372,24 +409,23 @@ flowchart TD
     FW --> S
     FW --> N
     N -->|"HTTP 127.0.0.1:3000"| W
-    W -->|"HTTP host.docker.internal:11434<br/>via docker0"| O
-    O -.->|"enp0s3, 10.0.2.15 : téléchargements<br/>à l'installation uniquement"| I
+    W -->|"HTTP host.docker.internal:11434<br/>(172.17.0.1, via docker0)"| O
+    NAT -.->|"apt, image Docker, modèle<br/>à l'installation uniquement"| I
 ```
 
 Le seul point d'entrée du chatbot est Nginx, en HTTPS. Open WebUI n'écoute que sur `127.0.0.1`, et Ollama n'est joignable que depuis les conteneurs, grâce au pare-feu. La carte NAT ne sert qu'à l'installation (paquets Debian, image Docker, modèle). Le chatbot fonctionne sans elle, comme le montre le test hors ligne.
 
 ### Tableau des composants
 
-| Composant | Où il tourne | Adresse et port | Joignable depuis | Rôle |
+| Composant | VM | IP | Port(s) | Rôle |
 |---|---|---|---|---|
-| OpenSSH | vm-chatbot, service systemd | 192.168.56.10:22 | Réseau host-only | Administration à distance |
-| Nginx 1.26.3 | vm-chatbot, service systemd | 192.168.56.10:80 et :443 | Réseau host-only | Reverse proxy, HTTPS, redirection HTTP vers HTTPS |
-| Open WebUI v0.13.3 | Conteneur Docker `open-webui` | 127.0.0.1:3000 (port 8080 dans le conteneur) | La VM uniquement (Nginx) | Interface web, comptes, historique des conversations |
-| Volume `open-webui` | Docker | (aucun port) | Le conteneur | Conserve comptes et conversations quand le conteneur est recréé |
-| Ollama 0.40.16 | vm-chatbot, service systemd | 0.0.0.0:11434 | Conteneurs Docker (`docker0`), filtré par le pare-feu | Charge le modèle et génère les réponses |
-| llama3.2:1b | Fichiers gérés par Ollama | (aucun port) | Ollama | Modèle de langage de 1,3 Go |
-| nftables | Noyau de vm-chatbot | (aucun port) | (sans objet) | Bloque tout le trafic entrant non autorisé |
-
+| OpenSSH | vm-chatbot | 192.168.56.10 | 22 | Administration à distance, depuis le réseau host-only |
+| Nginx 1.26.3 | vm-chatbot | 192.168.56.10 | 80, 443 | Reverse proxy, HTTPS, redirection HTTP vers HTTPS. Seul point d'entrée du chatbot |
+| Open WebUI v0.13.3 | vm-chatbot (conteneur Docker `open-webui`) | 127.0.0.1 | 3000 (8080 dans le conteneur) | Interface web, comptes, historique. Joignable seulement depuis la VM, par Nginx |
+| Ollama 0.40.16 | vm-chatbot | 0.0.0.0, filtré par le pare-feu | 11434 | Charge le modèle et génère les réponses. Joignable seulement depuis les conteneurs, via `docker0` (172.17.0.1) |
+| Volume `open-webui` | vm-chatbot (Docker) | — | — | Conserve comptes et conversations quand le conteneur est recréé |
+| llama3.2:1b | vm-chatbot (fichiers d'Ollama) | — | — | Modèle de langage de 1,3 Go |
+| nftables | vm-chatbot (noyau) | — | — | Bloque tout le trafic entrant non autorisé |
 
 ## Diagramme au choix
 
@@ -408,14 +444,14 @@ sequenceDiagram
     F->>N: Acceptée (enp0s8, port 443)
     N->>N: Déchiffrement TLS (certificat chatbot.local)
     alt Conteneur open-webui en marche
-        N->>W: Requête HTTP (en-têtes X-Forwarded-*, WebSocket)
+        N->>W: Requête HTTP ou WebSocket (en-têtes X-Forwarded-*)
         W->>W: Vérification de la session
         W->>O: POST /api/chat, modèle llama3.2:1b (via docker0, autorisé)
         O->>O: Chargement du modèle en mémoire si nécessaire
         loop Génération mot par mot
             O-->>W: Morceau de réponse
             W-->>N: Morceau de réponse
-            N-->>U: Affichage immédiat (proxy_buffering off)
+            N-->>U: Morceau de réponse, transmis sans attendre la fin
         end
     else Conteneur arrêté
         N-->>U: 502 Bad Gateway
@@ -427,7 +463,7 @@ sequenceDiagram
 - **Étapes 1 à 3.** Le pare-feu laisse passer la requête parce qu'elle arrive sur `enp0s8`, port 443. Nginx déchiffre ensuite la connexion. Le chiffrement s'arrête donc à Nginx, et la suite du trajet se fait en HTTP, mais à l'intérieur de la VM.
 - **Étapes 4 et 5.** Nginx transmet la requête à Open WebUI, qui vérifie que l'utilisateur est connecté. S'il n'y a pas de session, il renvoie vers la page de connexion.
 - **Étapes 6 et 7.** Open WebUI interroge Ollama. Cette connexion part du conteneur et entre dans la VM par `docker0`, la seule interface où le port 11434 est ouvert. Au premier appel, Ollama charge le modèle en mémoire, ce qui explique pourquoi la première réponse est lente.
-- **Boucle.** La réponse revient par morceaux. C'est pour ça que Nginx est configuré avec `proxy_buffering off`, pour afficher chaque morceau tout de suite, et avec `proxy_read_timeout 300s`, pour laisser le temps au modèle qui tourne sur le processeur.
+- **Boucle.** La réponse revient par morceaux. Nginx est donc configuré pour transmettre chaque morceau dès qu'il le reçoit (`proxy_buffering off`), et pour attendre jusqu'à 300 s sans recevoir de données (`proxy_read_timeout 300s`). Ce délai compte surtout avant le premier mot, pendant que le modèle se charge, puisque le compteur repart à chaque morceau reçu.
 - **Branche « conteneur arrêté ».** Nginx répond seul avec une erreur `502`. C'est exactement ce qu'on observe dans le test de panne.
 
 
@@ -435,10 +471,10 @@ sequenceDiagram
 
 ### Prérequis
 
-- VM `vm-chatbot` créée et configurée selon la section « Configuration réseau VirtualBox »
-- Connectivité vérifiée (ping et SSH de la machine hôte vers la VM, accès Internet et résolution DNS depuis la VM)
-- Snapshot `01-debian-reseau-ok` pris
-- Utilisateur `chatbot10` membre du groupe `sudo`
+- [ ] VM `vm-chatbot` créée et configurée selon la section « Configuration réseau VirtualBox »
+- [ ] Connectivité vérifiée (ping et SSH de la machine hôte vers la VM, accès Internet et résolution DNS depuis la VM)
+- [ ] Snapshot `01-debian-reseau-ok` pris
+- [ ] Utilisateur `chatbot10` membre du groupe `sudo`
 
 Sauf mention contraire, toutes les commandes de cette section sont exécutées **sur vm-chatbot**, dans une session SSH ouverte depuis la machine hôte (`ssh chatbot10@192.168.56.10`).
 
@@ -459,7 +495,7 @@ Le script installe le programme dans `/usr/local`, crée un utilisateur système
 
 **Vérification (sur vm-chatbot) :** fin de la sortie du script.
 
-```
+```text
 >>> Installing ollama to /usr/local
 >>> Downloading ollama-linux-amd64.tar.zst
 ######################################################################## 100.0%
@@ -512,24 +548,28 @@ curl http://localhost:11434
 **Pourquoi :** Ollama n'est qu'un moteur, il lui faut un modèle de langage à faire tourner. Sans carte graphique, on choisit `llama3.2:1b` (1 milliard de paramètres, 1,3 Go), un des plus petits modèles disponibles, pour garder des temps de réponse acceptables sur le processeur. Une fois téléchargé, le modèle est stocké sur le disque de la VM et fonctionne sans Internet.
 
 ```bash
+# Télécharger le modèle
 ollama pull llama3.2:1b
+
+# Lister les modèles installés
+ollama list
 ```
 
 **Vérification (sur vm-chatbot) :** le téléchargement se termine par `success` et le modèle apparaît dans la liste des modèles installés.
 
-```bash
-ollama pull llama3.2:1b
-# → pulling manifest
-# → pulling 74701a8c35f6: 100% ... 1.3 GB
-# → pulling 966de95ca8a6: 100% ... 1.4 KB
-# → pulling 4f659a1e86d7: 100% ...  485 B
-# → verifying sha256 digest
-# → writing manifest
-# → success
+```text
+# Sortie de ollama pull
+pulling manifest
+pulling 74701a8c35f6: 100% ... 1.3 GB
+pulling 966de95ca8a6: 100% ... 1.4 KB
+pulling 4f659a1e86d7: 100% ...  485 B
+verifying sha256 digest
+writing manifest
+success
 
-ollama list
-# → NAME           ID              SIZE      MODIFIED
-# → llama3.2:1b    baf6a787fdff    1.3 GB    7 seconds ago
+# Sortie de ollama list
+NAME           ID              SIZE      MODIFIED
+llama3.2:1b    baf6a787fdff    1.3 GB    7 seconds ago
 ```
 
 ::: {.callout-tip}
@@ -538,7 +578,7 @@ ollama list
 ![Téléchargement de llama3.2:1b et sortie de ollama list](images/02-ollama-pull.png){width=90%}
 :::
 
-### Test du modèle (sur vm-chatbot)
+### Test du modèle (sur vm-chatbot) {#sec-test-modele}
 
 **Pourquoi :** avant d'ajouter l'interface web, on vérifie que le modèle répond, d'abord en ligne de commande, puis via l'API HTTP, qui est exactement le canal qu'Open WebUI utilisera pour lui parler.
 
@@ -554,16 +594,16 @@ Le corps de la requête (`-d`) est au format JSON. `model` désigne le modèle �
 
 **Vérification (sur vm-chatbot) :**
 
-```bash
-ollama run llama3.2:1b "Bonjour, présente-toi en une phrase."
-# → Bonjour, je suis une intelligence artificielle capable de fournir des informations et des divertissements en anglais.
+```text
+# Sortie de ollama run
+Bonjour, je suis une intelligence artificielle capable de fournir des informations et des divertissements en anglais.
 
-time curl http://localhost:11434/api/generate -d '{"model":"llama3.2:1b","prompt":"Bonjour","stream":false}'
-# → {"model":"llama3.2:1b","created_at":"2026-11-14T15:20:31.638652972Z",
-# →  "response":"Bonjour ! Comment puis-je vous aider aujourd'hui ?","done":true,
-# →  "done_reason":"stop", ... "total_duration":809422046, ... "eval_count":12,
-# →  "eval_duration":644115000}
-# → real    0m0,828s
+# Sortie de time curl ... /api/generate
+{"model":"llama3.2:1b","created_at":"2026-11-14T15:20:31.638652972Z",
+ "response":"Bonjour ! Comment puis-je vous aider aujourd'hui ?","done":true,
+ "done_reason":"stop", ... "total_duration":809422046, ... "eval_count":12,
+ "eval_duration":644115000}
+real    0m0,828s
 ```
 
 L'API renvoie un objet JSON, et la réponse du modèle se trouve dans le champ `response`. La requête complète a pris **0,828 s**, dont 0,64 s de génération pour 12 tokens, soit environ 19 tokens par seconde. C'est rapide parce que la question est très simple et que le modèle était déjà chargé en mémoire par le test précédent.
@@ -717,7 +757,7 @@ docker run -d --name open-webui --restart always \
 
 Au premier lancement, Docker télécharge l'image (plusieurs Go, répartis en couches), puis affiche l'identifiant du conteneur créé.
 
-```
+```text
 main: Pulling from open-webui/open-webui
 4f4fb700ef54: Pull complete
 ...
@@ -767,9 +807,23 @@ df -h /
 ![Conteneur Open WebUI en bonne santé et réponse 200 OK](images/03-openwebui-healthy.png){width=90%}
 :::
 
-### Premier accès à l'interface (depuis la machine hôte)
+**Vérification de l'adresse utilisée par le conteneur (sur vm-chatbot) :** le nom `host.docker.internal` correspond bien à l'adresse de la VM sur l'interface `docker0`.
 
-**Pourquoi :** Open WebUI n'écoute qu'en local sur la VM, donc le navigateur de la machine hôte ne peut pas l'atteindre directement. En attendant Nginx, on y accède par un tunnel SSH, qui relie le port 3000 de la machine hôte au port 3000 de la VM à travers la connexion SSH. Ça permet de tester l'application sans exposer son port sur le réseau.
+```bash
+ip -br addr show docker0
+# → docker0          UP             172.17.0.1/16 fe80::...
+
+docker exec open-webui getent hosts host.docker.internal
+# → 172.17.0.1      host.docker.internal
+```
+
+![Adresse de docker0 et résolution de host.docker.internal dans le conteneur](images/03-docker0.png){width=90%}
+
+C'est donc par l'adresse `172.17.0.1`, et par l'interface `docker0`, qu'Open WebUI joint Ollama. On s'en sert plus loin dans les règles du pare-feu.
+
+### Premier accès à l'interface (depuis la machine hôte) {#sec-premier-acces}
+
+**Pourquoi :** Open WebUI n'écoute qu'en local sur la VM, donc le navigateur de la machine hôte ne peut pas l'atteindre directement. En attendant Nginx, on y accède par un tunnel SSH, qui relie le port 3000 de la machine hôte au port 3000 de la VM à travers la connexion SSH. Cela permet de tester l'application sans exposer son port sur le réseau.
 
 ```powershell
 # Sur la machine hôte, dans un nouveau terminal à laisser ouvert
@@ -953,10 +1007,10 @@ EOF
 | `listen 443 ssl` + `ssl_certificate*` | Terminaison TLS avec le certificat auto-signé |
 | `ssl_protocols TLSv1.2 TLSv1.3` | Refuse les versions obsolètes de TLS, qui ont des failles connues |
 | `proxy_pass http://127.0.0.1:3000` | Transmet les requêtes à Open WebUI |
-| `Upgrade` / `Connection "upgrade"` | Laisse passer les WebSockets, qu'Open WebUI utilise pour afficher la réponse au fur et à mesure |
+| `Upgrade` / `Connection "upgrade"` | Laisse passer les WebSockets, qu'Open WebUI utilise pour sa connexion en temps réel avec le navigateur (adresse `/ws/socket.io`, visible dans le journal de Nginx au test de panne) |
 | `X-Forwarded-For` / `X-Forwarded-Proto` | Transmet à Open WebUI l'adresse réelle du client et le protocole d'origine (HTTPS) |
-| `proxy_read_timeout 300s` | Évite une erreur 504 quand le modèle met plus de 60 s (valeur par défaut) à répondre |
-| `proxy_buffering off` | Transmet la réponse morceau par morceau, sans attendre la fin |
+| `proxy_read_timeout 300s` | Temps maximum d'attente **entre deux envois de données** d'Open WebUI (60 s par défaut). Le compteur repart à chaque morceau reçu, donc ce réglage compte surtout pendant l'attente du premier mot, quand le modèle se charge |
+| `proxy_buffering off` | Transmet les réponses HTTP en flux, morceau par morceau, sans attendre la fin. C'est un mécanisme différent des WebSockets |
 
 Activation du site et désactivation de la page par défaut :
 
@@ -986,7 +1040,7 @@ sudo nginx -t
 ![Configuration Nginx et test de syntaxe réussi](images/04-nginx-config.png){width=90%}
 :::
 
-### Résolution du nom chatbot.local (sur la machine hôte)
+### Résolution du nom chatbot.local (sur la machine hôte) {#sec-chatbot-local}
 
 **Pourquoi :** le certificat est émis pour `chatbot.local`. Pour accéder au chatbot par ce nom plutôt que par l'adresse IP, la machine hôte doit savoir qu'il correspond à `192.168.56.10`. Aucun serveur DNS ne connaît ce nom local, donc on l'indique dans le fichier `hosts` de la machine hôte, que le système consulte avant le DNS.
 
@@ -996,7 +1050,7 @@ Sur la **machine hôte Windows** :
 2. Ouvrir `C:\Windows\System32\drivers\etc\hosts`, en choisissant le type « Tous les fichiers (\*.\*) », car le fichier n'a pas d'extension.
 3. Ajouter à la fin la ligne suivante, puis enregistrer :
 
-```
+```text
 192.168.56.10  chatbot.local
 ```
 
@@ -1075,9 +1129,9 @@ Le code `301` signifie « déplacé définitivement ». Le navigateur suit autom
 **Snapshot conseillé :** Nginx sert le chatbot en HTTPS, prendre le snapshot `04-nginx-https-ok` avant de configurer le pare-feu.
 :::
 
-### Configuration du pare-feu nftables (sur vm-chatbot)
+### Configuration du pare-feu nftables (sur vm-chatbot) {#sec-pare-feu}
 
-**Pourquoi :** sans pare-feu, tous les ports de la VM sont ouverts. Depuis la phase 3, Ollama écoute sur toutes les interfaces et n'a aucune authentification, donc n'importe quelle machine du réseau peut utiliser le modèle sans passer par la connexion d'Open WebUI. On applique ici la règle de sécurité de base du syllabus (section 2.6), qui consiste à bloquer tous les ports sauf ceux des applications utilisées.
+**Pourquoi :** sans pare-feu, rien ne filtre le trafic entrant, et tout service qui écoute sur une interface réseau de la VM est joignable. C'est le cas d'Ollama depuis la phase 3 : il écoute sur toutes les interfaces et n'a aucune authentification, donc n'importe quelle machine du réseau peut utiliser le modèle sans passer par la connexion d'Open WebUI. On applique ici la règle de sécurité de base du syllabus (section 2.6), qui consiste à bloquer tous les ports sauf ceux des applications utilisées.
 
 **Constat avant le pare-feu (machine hôte, PowerShell) :**
 
@@ -1164,12 +1218,12 @@ sudo nft -c -f /etc/nftables.conf && echo "SYNTAXE OK"
 ::: {.callout-important}
 **Sur Mac**, deux lignes des règles changent, à cause des noms de cartes :
 
-```
+```text
 iifname "enp0s8" udp sport 67 udp dport 68 accept
 iifname "enp0s9" tcp dport { 22, 80, 443 } accept
 ```
 
-Si on garde les noms du PC, le pare-feu autorise une carte qui n'existe pas et bloque tout le reste, y compris le SSH et le site. Il faut alors passer par la console VirtualBox et taper `sudo nft delete table inet filtre`.
+Attention, si on garde les noms du PC, la règle des ports 22, 80 et 443 s'applique à `enp0s8`, qui sur Mac est la **carte NAT**. Ces ports restent donc fermés sur la carte host-only `enp0s9`, et le SSH comme le site sont bloqués depuis le Mac. La règle DHCP, elle, vise `enp0s3`, qui n'existe pas sur Mac. En cas d'oubli, il faut passer par la console VirtualBox et taper `sudo nft delete table inet filtre`.
 :::
 
 **Application des règles :**
@@ -1241,7 +1295,7 @@ curl.exe -kI https://chatbot.local/
 | 3000 (Open WebUI) | Connexion refusée | Délai dépassé |
 | 443 (Nginx, HTTPS) | `200 OK` | `200 OK` |
 
-Le message change pour le port 3000. Avant, la VM **refusait** la connexion tout de suite, parce que rien n'écoutait sur cette adresse. Maintenant, le pare-feu **jette** le paquet sans répondre, et le client attend jusqu'au délai de 5 secondes. Ce port est donc protégé deux fois, par la publication Docker limitée à `127.0.0.1` et par le pare-feu.
+Le message change pour le port 3000. Avant, la VM **refusait** la connexion tout de suite, parce que rien n'écoutait sur cette adresse. Maintenant, le pare-feu **jette** le paquet sans répondre, et le client attend jusqu'au délai de 5 secondes. Ce port est donc protégé deux fois, par la publication Docker limitée à `127.0.0.1` et par le pare-feu. Comme il était déjà fermé avant, ce n'est pas lui qui prouve l'effet du pare-feu, mais le port 11434, ouvert avant et bloqué après.
 
 ![Ports internes bloqués et site HTTPS accessible, après le pare-feu](images/05-apres.png){width=90%}
 
@@ -1258,9 +1312,9 @@ docker exec open-webui curl -s http://host.docker.internal:11434
 
 ![Le chat répond toujours, pare-feu actif](images/05-chat-apres-firewall.png){width=90%}
 
-La réponse elle-même est approximative (le modèle parle de « connexion Internet d'une maison »). Ça vient du petit modèle de 1 milliard de paramètres, pas de l'infrastructure, puisque la question est bien transmise et que la réponse revient.
+La réponse elle-même est approximative (le modèle parle de « connexion Internet d'une maison »). Cela vient du petit modèle de 1 milliard de paramètres, pas de l'infrastructure, puisque la question est bien transmise et que la réponse revient.
 
-### Redémarrage : tout revient seul (sur vm-chatbot)
+### Redémarrage : tout revient seul (sur vm-chatbot) {#sec-reboot}
 
 **Pourquoi :** un serveur doit survivre à un redémarrage (coupure de courant, mise à jour) sans qu'on doive tout relancer à la main. C'est surtout un test pour le pare-feu, car `sudo nft -f` applique les règles immédiatement, mais seul `systemctl enable nftables` les recharge au démarrage.
 
@@ -1293,7 +1347,26 @@ docker ps
 
 ![Services, pare-feu et conteneur revenus seuls après le redémarrage](images/05-reboot.png){width=90%}
 
-Les quatre services sont actifs, notre table `inet filtre` est rechargée à côté des tables créées par Docker, et le conteneur Open WebUI a été relancé automatiquement grâce à `--restart always`. L'état `health: starting` est normal 42 secondes après le démarrage, Open WebUI met environ une minute à se lancer avant de passer à `healthy`.
+Les quatre services sont actifs, notre table `inet filtre` est rechargée à côté des tables créées par Docker, et le conteneur Open WebUI a été relancé automatiquement grâce à `--restart always`. 42 secondes après le démarrage, il est encore en `health: starting`, ce qui ne prouve pas encore que le chatbot remarche.
+
+Nous avons donc refait un redémarrage en allant jusqu'au bout. Après environ une minute, le conteneur passe à `healthy` :
+
+```bash
+systemctl is-active ollama docker nginx nftables
+# → active
+# → active
+# → active
+# → active
+
+docker ps
+# → ... ghcr.io/open-webui/open-webui:main ... Up About a minute (healthy)   127.0.0.1:3000->8080/tcp   open-webui
+```
+
+![Conteneur healthy après le redémarrage](images/05-reboot-healthy.png){width=90%}
+
+**Vérification (navigateur de l'hôte) :** après ce redémarrage, la question « Qu'est-ce qu'un reverse proxy ? » reçoit une réponse du modèle. Dans le menu de gauche, les conversations des jours précédents (« Belgium's Capital », « HTTPS basics », « Firewall Purpose »…) sont toujours là, donc l'historique enregistré dans le volume `open-webui` est conservé.
+
+![Le chat répond après le redémarrage, et l'historique est conservé](images/05-reboot-chat.png){width=90%}
 
 ::: {.callout-tip}
 **Snapshot conseillé :** le pare-feu est actif et survit au redémarrage, prendre le snapshot `05-firewall-ok`. C'est l'état final de la VM.
@@ -1302,25 +1375,27 @@ Les quatre services sont actifs, notre table `inet filtre` est rechargée à cô
 
 ## Vérification et tests
 
-Les tests ci-dessous ont été réalisés sur la VM principale, une fois l'installation terminée. Les deux tests obligatoires sont le **test de panne** (n° 10) et le **test de sécurité négatif** (n° 6 et 7). Les tests 1 à 5 et 8 sont détaillés dans la section *Installation et déploiement*, à l'étape correspondante, et les autres juste en dessous.
+Les tests ci-dessous ont été réalisés sur la VM principale. Les deux tests obligatoires sont le **test de sécurité négatif** (n° 6) et le **test de panne** (n° 10).
+
+Les tests 1 à 5, 8 et 9 ont été faits pendant l'installation, avec leurs captures : chaque ligne du tableau renvoie vers la section où le test est décrit. Les tests 6, 10 et 11 sont détaillés juste après le tableau.
 
 ### Tableau récapitulatif des tests
 
 | # | Test | Commande / Action | Résultat attendu | Résultat obtenu | ✅/❌ |
 |---|---|---|---|---|---|
-| 1 | Le modèle répond en local | `ollama run llama3.2:1b "..."` puis `curl` sur l'API `/api/generate` | Une réponse du modèle | Réponse en ligne de commande, et JSON de l'API en 0,828 s | ✅ |
-| 2 | Open WebUI joint Ollama | Question dans l'interface, via le tunnel SSH | Le modèle apparaît et répond | « La réponse finale est Bruxelles. » | ✅ |
-| 3 | HTTPS via Nginx | `curl.exe -kI https://chatbot.local/` | `200 OK`, `Server: nginx` | `HTTP/1.1 200 OK`, `Server: nginx` | ✅ |
-| 4 | Redirection HTTP | `curl.exe -I http://chatbot.local/` | `301` vers HTTPS | `301 Moved Permanently`, `Location: https://chatbot.local/` | ✅ |
-| 5 | Pas d'inscription libre | `https://chatbot.local` en navigation privée | Page de connexion seule | Page `/auth`, sans lien d'inscription | ✅ |
-| 6 | **Sécurité négative** : Ollama inaccessible depuis l'hôte | `curl.exe --max-time 5 http://192.168.56.10:11434/` | Connexion bloquée | `Connection timed out` (avant le pare-feu : `Ollama is running`) | ✅ |
-| 7 | **Sécurité négative** : Open WebUI inaccessible sans Nginx | `curl.exe --max-time 5 http://192.168.56.10:3000/` | Connexion bloquée | `Connection timed out` | ✅ |
-| 8 | Le conteneur joint toujours Ollama | `docker exec open-webui curl -s http://host.docker.internal:11434` | `Ollama is running` | `Ollama is running`, et le chat répond dans le navigateur | ✅ |
-| 9 | Redémarrage de la VM | `sudo reboot`, puis `systemctl is-active`, `nft list tables`, `docker ps` | Tout redémarre seul | 4 × `active`, table `inet filtre` rechargée, conteneur relancé | ✅ |
-| 10 | **Panne simulée** | `docker stop open-webui`, puis `curl.exe -kI https://chatbot.local/` | Erreur `502` renvoyée par Nginx | `HTTP/1.1 502 Bad Gateway`, retour à la normale après `docker start` | ✅ |
-| 11 | Fonctionnement hors ligne | Carte NAT débranchée, question dans le chat | Le chat répond sans Internet | `ping 8.8.8.8` : 100 % de perte, le modèle répond quand même | ✅ |
+| 1 | Le modèle répond en local (voir @sec-test-modele) | `ollama run llama3.2:1b "..."` puis `curl` sur l'API `/api/generate` | Une réponse du modèle | Réponse en ligne de commande, et JSON de l'API en 0,828 s | ✅ |
+| 2 | Open WebUI joint Ollama (voir @sec-premier-acces) | Question dans l'interface, via le tunnel SSH | Le modèle apparaît et répond | « La réponse finale est Bruxelles. » | ✅ |
+| 3 | HTTPS via Nginx (voir @sec-chatbot-local) | `curl.exe -kI https://chatbot.local/` | `200 OK`, `Server: nginx` | `HTTP/1.1 200 OK`, `Server: nginx` | ✅ |
+| 4 | Redirection HTTP (voir @sec-chatbot-local) | `curl.exe -I http://chatbot.local/` | `301` vers HTTPS | `301 Moved Permanently`, `Location: https://chatbot.local/` | ✅ |
+| 5 | Pas d'inscription libre (voir @sec-chatbot-local) | `https://chatbot.local` en navigation privée | Page de connexion seule | Page `/auth`, sans lien d'inscription | ✅ |
+| 6 | **Sécurité négative** : Ollama inaccessible depuis l'hôte (voir @sec-test-securite) | `curl.exe --max-time 5 http://192.168.56.10:11434/` | Connexion bloquée | Avant le pare-feu : `Ollama is running`. Après : `Connection timed out` | ✅ |
+| 7 | Port 3000 également filtré (voir @sec-test-securite) | `curl.exe --max-time 5 http://192.168.56.10:3000/` | Connexion bloquée | Avant : connexion refusée (déjà fermé par Docker). Après : `Connection timed out` | ✅ |
+| 8 | Le conteneur joint toujours Ollama (voir @sec-pare-feu) | `docker exec open-webui curl -s http://host.docker.internal:11434` | `Ollama is running` | `Ollama is running`, et le chat répond dans le navigateur | ✅ |
+| 9 | Redémarrage de la VM (voir @sec-reboot) | `sudo reboot`, puis `systemctl is-active`, `nft list tables`, `docker ps` | Tout redémarre seul | 4 × `active`, table `inet filtre` rechargée, conteneur `healthy`, le chat répond et l'historique est conservé | ✅ |
+| 10 | **Panne simulée** (voir @sec-test-panne) | `docker stop open-webui`, puis `curl.exe -kI https://chatbot.local/` | Erreur `502` renvoyée par Nginx | `HTTP/1.1 502 Bad Gateway`, `Connection refused` dans le journal de Nginx, retour à la normale après `docker start` | ✅ |
+| 11 | Fonctionnement hors ligne (voir @sec-test-hors-ligne) | Carte NAT débranchée, question dans le chat | Le chat répond sans Internet | `ping 8.8.8.8` : 100 % de perte, le modèle répond quand même | ✅ |
 
-### Tests 6 et 7 — Sécurité négative : ports internes bloqués
+### Test 6 — Sécurité négative : Ollama inaccessible depuis le réseau {#sec-test-securite}
 
 **Ce que le test valide :** un service interne ne doit pas être joignable depuis le réseau, même par quelqu'un qui connaît l'adresse de la VM. Comme Ollama n'a pas d'authentification, sans pare-feu n'importe quelle machine du réseau pourrait utiliser le modèle sans passer par Open WebUI.
 
@@ -1341,13 +1416,11 @@ curl.exe --max-time 5 http://192.168.56.10:3000/
 # → curl: (28) Connection timed out after 5000 milliseconds
 ```
 
-Les deux tentatives échouent, parce que le pare-feu jette les paquets sans répondre. Le seul chemin vers le chatbot reste `https://chatbot.local`, qui demande de se connecter. Les captures correspondantes se trouvent dans la partie sur le pare-feu (`05-avant` et `05-apres`).
+Le port 11434 répondait avant le pare-feu et ne répond plus après : c'est la preuve que le pare-feu bloque l'accès direct à Ollama. Le seul chemin vers le chatbot reste `https://chatbot.local`, qui demande de se connecter.
 
-### Test 9 — Redémarrage de la VM
+Le port 3000 (test 7) échoue aussi, mais il était déjà fermé avant le pare-feu, puisque Docker ne le publie que sur `127.0.0.1`. Ce test montre seulement que le pare-feu ajoute une deuxième protection. Les captures se trouvent dans la partie sur le pare-feu (`05-avant` et `05-apres`).
 
-Détaillé à l'étape *Redémarrage : tout revient seul*. Il valide que les services sont activés au démarrage (`systemctl enable`), que le conteneur a la politique `--restart always`, et que les règles du pare-feu sont rechargées par le service `nftables`.
-
-### Test 10 — Panne simulée d'Open WebUI
+### Test 10 — Panne simulée d'Open WebUI {#sec-test-panne}
 
 **Ce que le test valide :** le comportement du système quand un composant tombe. On arrête le conteneur Open WebUI. Nginx doit rester en ligne et signaler clairement que le service derrière lui ne répond plus, puis tout doit revenir après un simple redémarrage du conteneur.
 
@@ -1364,7 +1437,7 @@ docker ps -a
 
 ![Arrêt du conteneur Open WebUI](images/06-panne-stop.png){width=90%}
 
-Le code `137` veut dire que le conteneur a été arrêté de force. `docker stop` envoie d'abord un signal d'arrêt propre, attend 10 secondes, puis tue le processus s'il tourne encore (137 = 128 + 9, le signal `SIGKILL`). Ce n'est pas gênant ici, car les données (comptes, conversations) sont dans le volume `open-webui` et pas dans le conteneur.
+Le code `137` veut dire que le conteneur a été arrêté de force. `docker stop` envoie d'abord un signal d'arrêt propre, attend par défaut 10 secondes, puis tue le processus s'il tourne encore (137 = 128 + 9, le signal `SIGKILL`). Les données (comptes, conversations) sont dans le volume `open-webui` et pas dans le conteneur, mais un arrêt forcé peut quand même couper une écriture en cours. Il faut donc vérifier les données après coup, ce qu'on fait plus bas.
 
 **Depuis l'hôte (PowerShell) :**
 
@@ -1381,7 +1454,22 @@ Dans le navigateur, la page affiche le message d'erreur de Nginx :
 
 ![Page 502 Bad Gateway dans le navigateur](images/06-panne-navigateur.png){width=70%}
 
-**Lecture du résultat :** la réponse vient bien de Nginx (`Server: nginx`), qui fonctionne toujours. Le code **502** signifie que Nginx n'a obtenu aucune réponse de `127.0.0.1:3000`. Pour diagnostiquer, ce code oriente donc directement vers le conteneur, et non vers Nginx, le certificat ou le réseau.
+**Lecture du résultat :** la réponse vient bien de Nginx (`Server: nginx`), qui fonctionne toujours. Dans ce test, le 502 vient de l'arrêt du conteneur, puisque Nginx ne parvient plus à joindre `127.0.0.1:3000`.
+
+Lors d'une seconde exécution du test, nous avons aussi consulté le journal d'erreurs de Nginx, qui le confirme directement :
+
+```bash
+sudo tail -n 2 /var/log/nginx/error.log
+# → 2026/11/22 00:23:44 [error] 757#757: *380 connect() failed (111: Connection refused) while connecting
+# →   to upstream, client: 192.168.56.1, server: chatbot.local,
+# →   request: "GET /ws/socket.io/?EIO=4&transport=websocket HTTP/1.1",
+# →   upstream: "http://127.0.0.1:3000/ws/socket.io/?EIO=4&transport=websocket", host: "chatbot.local"
+# → 2026/11/22 00:23:50 [error] 757#757: *383 connect() failed (111: Connection refused) ...
+```
+
+![Journal d'erreurs de Nginx pendant la panne](images/06-panne-log.png){width=90%}
+
+`Connection refused` montre que plus rien n'écoute sur `127.0.0.1:3000`. Ces lignes viennent de l'onglet du navigateur resté ouvert, qui essaie de rouvrir sa connexion WebSocket (`transport=websocket`) toutes les quelques secondes. C'est aussi la preuve que les WebSockets d'Open WebUI passent bien par Nginx.
 
 **Remise en service (sur vm-chatbot) :**
 
@@ -1390,11 +1478,11 @@ docker start open-webui
 # → open-webui
 ```
 
-Après environ une minute de démarrage, `https://chatbot.local` affiche de nouveau l'interface, avec le modèle `llama3.2:1b` disponible et la session toujours ouverte. Aucune donnée n'a été perdue.
+Après environ une minute de démarrage, `https://chatbot.local` affiche de nouveau l'interface, avec le modèle `llama3.2:1b` disponible et la session toujours ouverte. Les conversations créées avant l'arrêt forcé (« Belgium's Capital », « HTTPS basics », « Firewall Purpose ») sont toujours dans l'historique, comme le montre la capture prise après le redémarrage de la VM.
 
 ![Interface de nouveau accessible après docker start](images/06-panne-retour.png){width=90%}
 
-### Test 11 — Fonctionnement sans Internet
+### Test 11 — Fonctionnement sans Internet {#sec-test-hors-ligne}
 
 **Ce que le test valide :** le principe même du projet. Le modèle tourne sur la VM, donc une question posée au chatbot ne part vers aucun serveur extérieur. On coupe l'accès Internet de la VM en gardant le réseau host-only, et on vérifie que le chat répond toujours.
 
@@ -1454,6 +1542,8 @@ ssh chatbot10@192.168.56.10
 
 ![Suppression des anciennes empreintes et connexion SSH réussie](images/01-ssh-connexion.png){width=90%}
 
+Avec le recul, il aurait fallu comparer la nouvelle empreinte avec celle de la VM **avant** de taper `yes`. Sinon, on retire le blocage sans savoir si on se connecte bien à la bonne machine. Nous l'avons vérifié après coup avec `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` dans la console de la VM. L'empreinte affichée (`SHA256:NqfKR9P/aX+jd0ZA77ONzHT62ftNAaAiDedb2L4qLbk`) est identique à celle acceptée ici. C'est cette vérification qui figure maintenant dans la procédure.
+
 ---
 
 **2. `apt` bloqué après l'ajout du dépôt Docker : « Entrée 1 mal formée »**
@@ -1462,7 +1552,7 @@ ssh chatbot10@192.168.56.10
 
 ![Erreur apt après l'ajout du dépôt Docker](images/03-docker-list-erreur.png){width=90%}
 
-*Cause :* la commande qui écrit le fichier du dépôt tient sur une très longue ligne. Au moment du copier-coller, elle a été coupée par des retours à la ligne (les `>` visibles sur la capture). Le fichier `docker.list` a donc été écrit sur trois lignes, alors qu'`apt` exige qu'un dépôt tienne sur **une seule ligne**. La première ligne ne contenait pas d'adresse, d'où l'erreur « URI ».
+*Cause :* la commande qui écrit le fichier du dépôt tient sur une très longue ligne. Au moment du copier-coller, des retours à la ligne se sont glissés dedans. Les `>` visibles sur la capture sont l'invite de continuation de bash : le retour à la ligne s'est retrouvé entre les guillemets, donc dans le texte écrit dans `docker.list`. Le fichier `docker.list` a donc été écrit sur trois lignes, alors qu'`apt` exige qu'un dépôt tienne sur **une seule ligne**. La première ligne ne contenait pas d'adresse, d'où l'erreur « URI ».
 
 *Solution :* réécrire le fichier en découpant la commande en lignes courtes, à l'aide de deux variables, puis vérifier son contenu avant de relancer `apt update`.
 
@@ -1491,11 +1581,11 @@ C'est cette version en lignes courtes qui figure dans la procédure d'installati
 
 ![Erreur VirtualBox VERR_DISK_FULL](images/03-vbox-disque-plein.png){width=50%}
 
-*Cause :* le disque virtuel de la VM est à allocation dynamique. Il est annoncé à 40 Gio, mais son fichier sur la machine hôte ne grossit qu'au fur et à mesure des écritures. Le modèle (1,3 Go), puis l'image Open WebUI (plusieurs Go) l'ont fait grossir jusqu'à remplir le disque de la **machine hôte**, et VirtualBox a mis la VM en pause pour ne pas abîmer son disque. Nous avions pourtant vérifié la place libre sur le PC d'Aya au départ, mais nous avions oublié qu'elle avait elle aussi refait toute l'installation sur sa copie de la VM. Il y avait donc deux VMs complètes sur le même disque, avec chacune son modèle et son image Docker. Le disque de la VM, lui, n'était pas plein, puisque `df -h /` montre 13 Go utilisés sur 38 Go (35 %) une fois l'installation terminée.
+*Cause :* le disque virtuel de la VM est à allocation dynamique. Il est annoncé à 40 Gio, mais son fichier sur la machine hôte ne grossit qu'au fur et à mesure des écritures. Le modèle (1,3 Go), puis l'image Open WebUI (plusieurs Go) l'ont fait grossir jusqu'à remplir le disque de la **machine hôte**, et VirtualBox a mis la VM en pause parce qu'il ne pouvait plus écrire sur le disque de la machine hôte. Nous avions pourtant vérifié la place libre sur le PC d'Aya au départ, mais nous avions oublié qu'elle avait elle aussi refait toute l'installation sur sa copie de la VM. Il y avait donc deux VMs complètes sur le même disque, avec chacune son modèle et son image Docker. Le disque de la VM, lui, n'était pas plein, puisque `df -h /` montre 13 Go utilisés sur 38 Go (35 %) une fois l'installation terminée.
 
-*Solution :* libérer de l'espace sur la machine hôte (désinstallation d'un logiciel volumineux, 26 Go libres ensuite), puis reprendre la VM dans VirtualBox avec **Machine → Pause**. La VM est repartie sans rien perdre, mais le téléchargement avait échoué entre-temps, le serveur ayant fermé la connexion pendant la pause :
+*Solution :* libérer de l'espace sur la machine hôte (désinstallation d'un logiciel volumineux, 26 Go libres ensuite), puis reprendre la VM en décochant **Machine → Pause** dans la fenêtre de la VM (c'est un interrupteur). La VM est repartie sans rien perdre, mais le téléchargement avait échoué entre-temps, le serveur ayant fermé la connexion pendant la pause :
 
-```
+```text
 docker: failed to copy: read tcp 10.0.2.15:46138->185.199.108.154:443: read: connection reset by peer
 ```
 
@@ -1521,13 +1611,12 @@ Nous avons d'abord créé la VM principale sur le PC d'Aya Janaâ, puis nous en 
 
 - **Des réponses plus rapides et de meilleure qualité.** C'est la limite la plus visible du projet. Sans carte graphique, le modèle tourne uniquement sur le processeur. La première réponse a pris plus d'une minute, le temps de charger le modèle en mémoire, et les suivantes s'affichent mot par mot, à environ 19 tokens par seconde sur une question courte. Les réponses restent aussi parfois approximatives en français, comme la définition d'un pare-feu donnée par le modèle. On voit plusieurs pistes, de la plus simple à la plus coûteuse.
     - **Garder le modèle en mémoire.** Par défaut, Ollama décharge le modèle après 5 minutes sans question, donc la question suivante doit attendre qu'il soit rechargé. La variable `OLLAMA_KEEP_ALIVE=-1`, ajoutée dans le même fichier de surcharge que `OLLAMA_HOST`, le garderait chargé en permanence, mais il occuperait 1 à 2 Go de RAM en continu.
-    - **Donner plus de ressources à la VM.** La vitesse de génération dépend surtout du nombre de cœurs. Passer de 4 à 6 ou 8 processeurs virtuels, si la machine hôte le permet, accélérerait chaque réponse.
-    - **Passer à un modèle plus grand.** `llama3.2:3b` (environ 2 Go, 3 milliards de paramètres) répondrait mieux, surtout en français, mais environ deux à trois fois plus lentement sur le même processeur. Avec Ollama, il suffit d'une commande (`ollama pull llama3.2:3b`) et le nouveau modèle apparaît directement dans la liste d'Open WebUI. On pourrait garder les deux et laisser l'utilisateur choisir entre rapidité et qualité.
-    - **Utiliser une carte graphique.** VirtualBox ne donne pas accès au GPU de la machine hôte. Pour un vrai usage en entreprise, il faudrait installer Ollama sur une machine physique ou un serveur avec un GPU. Les réponses seraient presque instantanées, et on pourrait utiliser des modèles de 7 à 8 milliards de paramètres, beaucoup plus performants.
-- **Un certificat reconnu par les navigateurs.** Let's Encrypt (via `certbot`) n'est pas possible ici, parce qu'il demande un nom de domaine public et un serveur joignable depuis Internet. En réseau local, on pourrait créer une petite autorité de certification interne, signer le certificat de `chatbot.local` avec elle, puis l'installer comme autorité de confiance sur les postes des utilisateurs. L'avertissement du navigateur disparaîtrait.
-- **Fixer la version d'Open WebUI.** L'image `open-webui:main` change à chaque nouvelle version, donc refaire l'installation plus tard pourrait donner une interface différente de celle documentée ici. Avec le tag `ghcr.io/open-webui/open-webui:v0.13.3`, l'installation serait reproductible, et les mises à jour deviendraient un choix.
+    - **Donner plus de ressources à la VM.** La vitesse de génération dépend surtout du nombre de cœurs. Passer de 4 à 6 ou 8 processeurs virtuels accélérerait chaque réponse, dans la limite des cœurs physiques de la machine hôte.
+    - **Passer à un modèle plus grand.** `llama3.2:3b` (environ 2 Go, 3 milliards de paramètres) répondrait mieux, surtout en français, mais plus lentement sur le même processeur. Nous ne l'avons pas testé, mais avec trois fois plus de paramètres, on peut s'attendre à des réponses environ deux à trois fois plus lentes. Avec Ollama, il suffit d'une commande (`ollama pull llama3.2:3b`) et le nouveau modèle apparaît directement dans la liste d'Open WebUI. On pourrait garder les deux et laisser l'utilisateur choisir entre rapidité et qualité.
+    - **Utiliser une carte graphique.** VirtualBox ne donne pas accès au GPU de la machine hôte. Pour un vrai usage en entreprise, il faudrait installer Ollama sur une machine physique ou un serveur avec un GPU. Un GPU accélérerait fortement la génération, et on pourrait utiliser des modèles de 7 à 8 milliards de paramètres, beaucoup plus performants.
+- **Un certificat reconnu par les navigateurs.** Let's Encrypt (via `certbot`) ne peut pas délivrer de certificat pour un nom local comme `chatbot.local`, il faudrait un vrai nom de domaine public. En réseau local, on pourrait créer une petite autorité de certification interne, signer le certificat de `chatbot.local` avec elle, puis l'installer comme autorité de confiance sur les postes des utilisateurs. L'avertissement du navigateur disparaîtrait.
+- **Fixer la version d'Open WebUI.** L'image `open-webui:main` change à chaque nouvelle version, donc refaire l'installation plus tard pourrait donner une interface différente de celle documentée ici. On pourrait lancer l'image par son empreinte, déjà relevée lors du téléchargement : `ghcr.io/open-webui/open-webui@sha256:59b912d4246103c7285de0e9a5f2f6586614c06b4c4e46edc51a8f29e7b099a5`. On obtiendrait exactement la même image à chaque installation, et les mises à jour deviendraient un choix.
 - **Sauvegarder le volume `open-webui`.** Les comptes et conversations sont dans ce volume. Une sauvegarde régulière, par exemple avec `docker run --rm -v open-webui:/data -v /home/chatbot10/sauvegardes:/backup debian tar czf /backup/openwebui.tar.gz -C /data .` lancé par un timer systemd, permettrait de les restaurer après une erreur, sans dépendre des snapshots.
-- **Durcir l'accès SSH.** La connexion se fait aujourd'hui par mot de passe. Passer à une authentification par clé (`ssh-copy-id`), puis désactiver les mots de passe (`PasswordAuthentication no` dans `/etc/ssh/sshd_config`) protégerait contre les essais de mots de passe.
 
 
 ## Utilisation de l'IA
@@ -1539,8 +1628,8 @@ L'installation elle-même a été réalisée par le groupe. Chacune a fait toute
 
 ## Conclusion
 
-Nous avons mis en place un chatbot qui fonctionne entièrement en local. Le modèle `llama3.2:1b` tourne avec Ollama sur une VM Debian 13, l'interface Open WebUI est déployée dans un conteneur Docker, Nginx la rend accessible en HTTPS sous le nom `chatbot.local`, et un pare-feu nftables ne laisse entrer que SSH, HTTP et HTTPS. Les tests montrent que tout redémarre seul, qu'une panne d'Open WebUI est clairement signalée, que les services internes ne sont pas joignables depuis le réseau, et que le chatbot répond même sans Internet.
+Nous avons mis en place un chatbot qui fonctionne entièrement en local. Le modèle `llama3.2:1b` tourne avec Ollama sur une VM Debian 13, l'interface Open WebUI est déployée dans un conteneur Docker, Nginx la rend accessible en HTTPS sous le nom `chatbot.local`, et un pare-feu nftables ne laisse entrer que SSH, HTTP et HTTPS depuis la machine hôte. Les tests montrent que tout redémarre seul, qu'une panne d'Open WebUI est clairement signalée, que les services internes ne sont pas joignables depuis le réseau, et que le chatbot répond même sans Internet.
 
 Ce qui nous a surpris, c'est que nos vrais blocages ne venaient presque jamais du chatbot lui-même, mais de l'environnement, comme une empreinte SSH déjà enregistrée, une commande coupée par un copier-coller ou le disque du PC plein. Ce qui nous a demandé le plus de réflexion, c'est le réseau entre le conteneur et la VM. Dans un conteneur, `127.0.0.1` désigne le conteneur lui-même et pas la VM, et il a fallu comprendre `host.docker.internal` et l'interface `docker0`, puis en tenir compte dans le pare-feu.
 
-On a aussi remarqué l'écart entre une infrastructure qui fonctionne parfaitement et un petit modèle qui reste lent sur processeur et dont les réponses sont parfois approximatives. Faire tourner un chatbot en local est donc tout à fait possible, mais pour un vrai usage, il faudrait une machine plus puissante.
+On a aussi remarqué l'écart entre une infrastructure qui fonctionne correctement et un petit modèle qui reste lent sur processeur et dont les réponses sont parfois approximatives. Faire tourner un chatbot en local est donc tout à fait possible, mais pour un vrai usage, il faudrait une machine plus puissante.
