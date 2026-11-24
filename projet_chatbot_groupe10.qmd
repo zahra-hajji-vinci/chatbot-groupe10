@@ -60,7 +60,7 @@ La solution assemble quatre briques :
 
 ### Contexte et problématique
 
-Les assistants conversationnels en ligne envoient chaque question vers les serveurs d'un fournisseur externe. Pour une entreprise, ça pose un vrai problème de **confidentialité**, puisque des documents internes, des données clients ou du code source peuvent sortir du réseau. Un modèle de langage hébergé sur un serveur interne règle ce problème, même si ses performances sont plus modestes, surtout sans carte graphique.
+Les assistants conversationnels en ligne envoient chaque question vers les serveurs d'un fournisseur externe. Pour une entreprise, cela pose un vrai problème de **confidentialité**, puisque des documents internes, des données clients ou du code source peuvent sortir du réseau. Un modèle de langage hébergé sur un serveur interne règle ce problème, même si ses performances sont plus modestes, surtout sans carte graphique.
 
 Rendre ce service accessible pose ensuite des questions classiques d'administration système. Ollama n'a **aucune authentification**, donc toute personne qui atteint son port 11434 peut utiliser le modèle. Et si Open WebUI était exposé directement, il serait servi en HTTP, avec les mots de passe et les conversations en clair sur le réseau. Notre architecture règle ces deux points. Seul Nginx est joignable, en HTTPS. Open WebUI n'écoute qu'en local et demande une connexion. Enfin, le pare-feu empêche d'atteindre Ollama directement. On applique ainsi la règle de sécurité de base vue dans le syllabus (section 2.6), qui consiste à bloquer sur le serveur tous les ports sauf ceux des applications utilisées.
 
@@ -328,7 +328,7 @@ ssh chatbot10@192.168.56.10
 ```bash
 # Sur vm-chatbot (console VirtualBox)
 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
-# → 256 SHA256:NqfKR9P/aX+jd0ZA77ONzHT62ftNAaAiDedb2L4qLbk root@chatbot10 (ED25519)
+# → 256 SHA256:NqfKR9P/aX+jd0ZA770NzHT62ftNAaAiDedb2L4qLbk root@chatbot10 (ED25519)
 ```
 
 ![Empreinte de la clé SSH de la VM, dans la console](images/01-empreinte-vm.png){width=90%}
@@ -512,7 +512,7 @@ WARNING: No NVIDIA/AMD GPU detected. Ollama will run in CPU-only mode.
 ```
 
 ::: {.callout-note}
-**Avertissement GPU :** VirtualBox ne donne pas accès à la carte graphique de la machine hôte, donc Ollama tourne uniquement sur le processeur. C'est normal, mais les réponses seront plus lentes, et c'est pour ça qu'on a choisi un petit modèle.
+**Avertissement GPU :** VirtualBox ne donne pas accès à la carte graphique de la machine hôte, donc Ollama tourne uniquement sur le processeur. C'est normal, mais les réponses seront plus lentes, et c'est pour cela qu'on a choisi un petit modèle.
 :::
 
 ::: {.callout-tip}
