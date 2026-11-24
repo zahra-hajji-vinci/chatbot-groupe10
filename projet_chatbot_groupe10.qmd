@@ -60,7 +60,7 @@ La solution assemble quatre briques :
 
 ### Contexte et problématique
 
-Les assistants conversationnels en ligne envoient chaque question vers les serveurs d'un fournisseur externe. Pour une entreprise, cela pose un vrai problème de **confidentialité**, puisque des documents internes, des données clients ou du code source peuvent sortir du réseau. Un modèle de langage hébergé sur un serveur interne règle ce problème, même si ses performances sont plus modestes, surtout sans carte graphique.
+Les assistants conversationnels en ligne envoient chaque question vers les serveurs d'un fournisseur externe. Pour une entreprise, ça pose un vrai problème de **confidentialité**, puisque des documents internes, des données clients ou du code source peuvent sortir du réseau. Un modèle de langage hébergé sur un serveur interne règle ce problème, même si ses performances sont plus modestes, surtout sans carte graphique.
 
 Rendre ce service accessible pose ensuite des questions classiques d'administration système. Ollama n'a **aucune authentification**, donc toute personne qui atteint son port 11434 peut utiliser le modèle. Et si Open WebUI était exposé directement, il serait servi en HTTP, avec les mots de passe et les conversations en clair sur le réseau. Notre architecture règle ces deux points. Seul Nginx est joignable, en HTTPS. Open WebUI n'écoute qu'en local et demande une connexion. Enfin, le pare-feu empêche d'atteindre Ollama directement. On applique ainsi la règle de sécurité de base vue dans le syllabus (section 2.6), qui consiste à bloquer sur le serveur tous les ports sauf ceux des applications utilisées.
 
@@ -328,7 +328,7 @@ ssh chatbot10@192.168.56.10
 ```bash
 # Sur vm-chatbot (console VirtualBox)
 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
-# → 256 SHA256:NqfKR9P/aX+jd0ZA770NzHT62ftNAaAiDedb2L4qLbk root@chatbot10 (ED25519)
+# → 256 SHA256:NqfKR9P/aX+jd0ZA77ONzHT62ftNAaAiDedb2L4qLbk root@chatbot10 (ED25519)
 ```
 
 ![Empreinte de la clé SSH de la VM, dans la console](images/01-empreinte-vm.png){width=90%}
@@ -512,7 +512,7 @@ WARNING: No NVIDIA/AMD GPU detected. Ollama will run in CPU-only mode.
 ```
 
 ::: {.callout-note}
-**Avertissement GPU :** VirtualBox ne donne pas accès à la carte graphique de la machine hôte, donc Ollama tourne uniquement sur le processeur. C'est normal, mais les réponses seront plus lentes, et c'est pour cela qu'on a choisi un petit modèle.
+**Avertissement GPU :** VirtualBox ne donne pas accès à la carte graphique de la machine hôte, donc Ollama tourne uniquement sur le processeur. C'est normal, mais les réponses seront plus lentes, et c'est pour ça qu'on a choisi un petit modèle.
 :::
 
 ::: {.callout-tip}
@@ -1609,14 +1609,58 @@ Nous avons d'abord créé la VM principale sur le PC d'Aya Janaâ, puis nous en 
 
 ## Améliorations possibles
 
-- **Des réponses plus rapides et de meilleure qualité.** C'est la limite la plus visible du projet. Sans carte graphique, le modèle tourne uniquement sur le processeur. La première réponse a pris plus d'une minute, le temps de charger le modèle en mémoire, et les suivantes s'affichent mot par mot, à environ 19 tokens par seconde sur une question courte. Les réponses restent aussi parfois approximatives en français, comme la définition d'un pare-feu donnée par le modèle. On voit plusieurs pistes, de la plus simple à la plus coûteuse.
-    - **Garder le modèle en mémoire.** Par défaut, Ollama décharge le modèle après 5 minutes sans question, donc la question suivante doit attendre qu'il soit rechargé. La variable `OLLAMA_KEEP_ALIVE=-1`, ajoutée dans le même fichier de surcharge que `OLLAMA_HOST`, le garderait chargé en permanence, mais il occuperait 1 à 2 Go de RAM en continu.
-    - **Donner plus de ressources à la VM.** La vitesse de génération dépend surtout du nombre de cœurs. Passer de 4 à 6 ou 8 processeurs virtuels accélérerait chaque réponse, dans la limite des cœurs physiques de la machine hôte.
-    - **Passer à un modèle plus grand.** `llama3.2:3b` (environ 2 Go, 3 milliards de paramètres) répondrait mieux, surtout en français, mais plus lentement sur le même processeur. Nous ne l'avons pas testé, mais avec trois fois plus de paramètres, on peut s'attendre à des réponses environ deux à trois fois plus lentes. Avec Ollama, il suffit d'une commande (`ollama pull llama3.2:3b`) et le nouveau modèle apparaît directement dans la liste d'Open WebUI. On pourrait garder les deux et laisser l'utilisateur choisir entre rapidité et qualité.
-    - **Utiliser une carte graphique.** VirtualBox ne donne pas accès au GPU de la machine hôte. Pour un vrai usage en entreprise, il faudrait installer Ollama sur une machine physique ou un serveur avec un GPU. Un GPU accélérerait fortement la génération, et on pourrait utiliser des modèles de 7 à 8 milliards de paramètres, beaucoup plus performants.
-- **Un certificat reconnu par les navigateurs.** Let's Encrypt (via `certbot`) ne peut pas délivrer de certificat pour un nom local comme `chatbot.local`, il faudrait un vrai nom de domaine public. En réseau local, on pourrait créer une petite autorité de certification interne, signer le certificat de `chatbot.local` avec elle, puis l'installer comme autorité de confiance sur les postes des utilisateurs. L'avertissement du navigateur disparaîtrait.
-- **Fixer la version d'Open WebUI.** L'image `open-webui:main` change à chaque nouvelle version, donc refaire l'installation plus tard pourrait donner une interface différente de celle documentée ici. On pourrait lancer l'image par son empreinte, déjà relevée lors du téléchargement : `ghcr.io/open-webui/open-webui@sha256:59b912d4246103c7285de0e9a5f2f6586614c06b4c4e46edc51a8f29e7b099a5`. On obtiendrait exactement la même image à chaque installation, et les mises à jour deviendraient un choix.
-- **Sauvegarder le volume `open-webui`.** Les comptes et conversations sont dans ce volume. Une sauvegarde régulière, par exemple avec `docker run --rm -v open-webui:/data -v /home/chatbot10/sauvegardes:/backup debian tar czf /backup/openwebui.tar.gz -C /data .` lancé par un timer systemd, permettrait de les restaurer après une erreur, sans dépendre des snapshots.
+Ces pistes n'ont pas été mises en œuvre. Les commandes montrent comment nous nous y prendrions, mais elles devraient être testées avant d'être utilisées.
+
+### Empêcher les données de sortir de la VM
+
+L'argument principal du projet est la confidentialité. Pourtant, notre test hors ligne prouve seulement que le chatbot n'a **pas besoin** d'Internet, pas que rien ne sort quand la carte NAT est branchée. Notre pare-feu applique la règle du cours (« bloquer tous les ports hormis ceux des applications utilisées ») uniquement au trafic **entrant**. En sortie, tout est encore permis.
+
+Deux programmes pourraient envoyer des données vers l'extérieur. Le premier est le conteneur Open WebUI. Son trafic sort par un double SNAT, comme vu au cours : Docker remplace l'adresse du conteneur par celle de la VM, puis VirtualBox fait de même avec celle de la machine hôte. Le second est Ollama, qui tourne directement sur la VM, sous l'utilisateur système `ollama`. On pourrait ajouter deux chaînes à notre table `inet filtre`, dans le même fichier `/etc/nftables.conf`, pour qu'elles soient rechargées au démarrage :
+
+```text
+chain forward {
+    type filter hook forward priority 0; policy accept;
+    iifname "docker0" oifname "enp0s3" drop
+}
+chain output {
+    type filter hook output priority 0; policy accept;
+    meta skuid "ollama" oifname "enp0s3" drop
+}
+```
+
+La première bloque le trafic du conteneur vers Internet, la seconde celui d'Ollama. La VM garderait Internet pour `apt`. Il y a deux contraintes. D'abord, `ollama pull` passe par le service Ollama, donc il faudrait retirer la règle le temps de télécharger un nouveau modèle. Ensuite, Open WebUI télécharge des composants à son premier démarrage. Il faudrait donc appliquer ces règles une fois l'installation terminée, puis vérifier que le chat répond toujours, et que `docker exec open-webui curl -sI https://debian.org` échoue bien.
+
+### Réduire l'exposition d'Ollama
+
+Ollama n'a aucune authentification et écoute sur `0.0.0.0`. Sa protection repose donc entièrement sur le pare-feu. Pour Open WebUI, on a vu au test 7 que le port 3000 est protégé deux fois, par Docker et par le pare-feu. On pourrait faire pareil pour Ollama, en deux étapes.
+
+La première étape tient sur la VM actuelle. On remplace `OLLAMA_HOST=0.0.0.0` par `OLLAMA_HOST=172.17.0.1`, l'adresse de `docker0`, la seule par laquelle le conteneur joint Ollama. Il y a deux pièges. Au démarrage, Ollama pourrait se lancer avant que Docker ait créé `docker0`, et l'adresse n'existerait pas encore. Il faut donc déclarer cette dépendance entre services dans systemd, avec `After=docker.service` et `Requires=docker.service` dans le fichier de surcharge. Et les commandes `ollama list` ou `ollama run`, qui cherchent le serveur sur `127.0.0.1` par défaut, ne marcheraient plus. Il faudrait définir `OLLAMA_HOST=172.17.0.1` aussi pour l'utilisateur `chatbot10`.
+
+La deuxième étape sépare le projet en deux VMs. Une VM web (Nginx et Open WebUI) reste exposée sur le réseau host-only, comme une DMZ. Une VM de calcul (Ollama) n'est reliée à la VM web que par un réseau interne de VirtualBox. Comme l'explique l'exemple de projet HAProxy du cours (encadré « Pourquoi host-only et pas réseau interne ? »), la machine hôte ne peut pas joindre un réseau interne. Pour l'exemple, c'était un inconvénient. Pour notre VM de calcul, c'est justement ce qu'on cherche.
+
+Ce réseau ne contient que deux machines. Avec la méthode du cours, il faut 2 adresses pour les machines, plus l'adresse du réseau et l'adresse de diffusion, soit 4 adresses, donc 2². Le masque fait alors 32 − 2 = 30 bits, par exemple `192.168.100.0/30` : `.1` pour la VM web, `.2` pour la VM de calcul, `.3` pour la diffusion. Grâce au SNAT de Docker, les requêtes d'Open WebUI arrivent sur la VM de calcul avec l'adresse `192.168.100.1`. Son pare-feu n'accepterait le port 11434 que depuis cette adresse. C'est le principe du reverse proxy poussé plus loin : un seul point d'entrée exposé, et le service sensible complètement isolé. En plus, on pourrait donner plus de RAM et de processeurs à la VM de calcul sans toucher au reste.
+
+Comme l'hôte ne peut plus joindre la VM de calcul, il faudrait l'administrer en deux temps : d'abord une connexion SSH à la VM web, puis, depuis celle-ci, une connexion SSH à la VM de calcul (`ssh chatbot10@192.168.100.2`).
+
+### Mettre en place une vraie politique de sauvegarde
+
+Aujourd'hui, nos seules copies sont les snapshots VirtualBox. Le cours dit qu'un snapshot n'est « pas vraiment une sauvegarde car difficile de restaurer un seul fichier ». De plus, nos snapshots sont stockés sur le disque de la machine hôte, celui qui s'est rempli au problème 3. Une politique de sauvegarde répondrait aux questions posées dans le cours :
+
+- **Quoi sauvegarder.** Le volume `open-webui` (comptes et conversations), et nos fichiers de configuration : site Nginx, `/etc/nftables.conf`, fichier de surcharge d'Ollama, certificat et clé. Pas le modèle, qu'on peut retélécharger : c'est la priorisation dont parle le cours.
+- **Comment.** Open WebUI enregistre ses données dans une base SQLite (`webui.db`). Le cours précise que les sauvegardes de type fichier ou instantané ne conviennent pas aux bases de données. Copier le volume pendant que le conteneur tourne pourrait donner une copie incohérente. Le plus simple serait d'arrêter le conteneur quelques secondes pendant la copie. Si l'outil `sqlite3` est disponible, sa commande `.backup` permettrait aussi de copier la base sans l'arrêter.
+- **Où et comment la protéger.** Sur une autre machine, envoyée avec `rsync` par SSH. Elle doit aussi être **chiffrée**, puisque les conversations sont justement les données confidentielles que le projet veut protéger.
+- **Quand et combien de temps.** Une sauvegarde complète chaque nuit, avec un timer systemd, suffirait vu la petite taille de la base. On garderait par exemple les 7 dernières, puisque le cours cite « n'avoir qu'une sauvegarde très récente » parmi les erreurs à éviter : une erreur remarquée trop tard se retrouverait aussi dans la dernière copie.
+- **La tester.** Le cours cite aussi « sauvegarde jamais testée ». Il faudrait restaurer régulièrement la sauvegarde dans un nouveau volume et vérifier que l'historique réapparaît, comme on l'a fait après le redémarrage.
+
+On respecterait ainsi la règle 3-2-1 : les données d'origine, une copie locale et une copie sur une autre machine.
+
+### Automatiser l'installation avec docker compose et Ansible
+
+Notre installation est une longue suite de commandes tapées à la main. Le problème 2 (une commande coupée par un copier-coller) et les adaptations nécessaires sur Mac montrent que c'est fragile. Le cours présente deux outils pour décrire une installation dans des fichiers.
+
+Avec docker compose, notre commande `docker run` et ses sept options deviendraient un fichier `compose.yaml`, avec les directives `ports` (`127.0.0.1:3000:8080`), `volumes` et `environment` vues au cours. On pourrait y fixer l'image par son empreinte (`@sha256:59b9…`, relevée au téléchargement), pour obtenir exactement la même version à chaque installation. Deux points à prévoir. Notre procédure n'installe pas le plugin Compose : il faudrait ajouter `docker-compose-plugin` à la commande d'installation de Docker, comme dans le syllabus. Et Compose ajoute le nom du projet devant le nom des volumes qu'il crée. Sans `external: true` sur le volume `open-webui`, il en créerait un nouveau, vide, et on perdrait les comptes et les conversations.
+
+Avec Ansible, un playbook ferait tout le reste : installation des paquets (`ansible.builtin.apt`), copie des fichiers de configuration (`copy` ou `template`), activation des services (`service`). Comme dans les labos, on lancerait Ansible sur la VM elle-même, avec `localhost` comme cible, puisque le contrôleur et la cible peuvent être la même machine. Les variables Ansible régleraient la différence entre PC et Mac, avec une variable pour le nom de la carte host-only (`enp0s8` ou `enp0s9`) utilisée dans un modèle de `nftables.conf`, et une autre pour l'architecture (`amd64` ou `arm64`) dans la ligne du dépôt Docker. Avant d'appliquer, `ansible-playbook --check` permettrait de vérifier ce qui changerait. Une limite : le script d'installation d'Ollama n'est pas prévu pour être relancé, il faudrait donc ne l'exécuter que si Ollama n'est pas encore installé.
 
 
 ## Utilisation de l'IA
