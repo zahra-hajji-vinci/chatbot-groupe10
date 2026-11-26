@@ -413,7 +413,7 @@ flowchart TD
     NAT -.->|"apt, image Docker, modèle<br/>à l'installation uniquement"| I
 ```
 
-Le seul point d'entrée du chatbot est Nginx, en HTTPS. Open WebUI n'écoute que sur `127.0.0.1`, et Ollama n'est joignable que depuis les conteneurs, grâce au pare-feu. La carte NAT ne sert qu'à l'installation (paquets Debian, image Docker, modèle). Le chatbot fonctionne sans elle, comme le montre le test hors ligne.
+Le seul point d'entrée du chatbot est Nginx, en HTTPS. Open WebUI n'écoute que sur `127.0.0.1`, et Ollama n'est joignable que depuis les conteneurs, grâce au pare-feu. La carte NAT sert à l'installation et aux mises à jour, mais le chatbot n'en a pas besoin pour fonctionner, comme le montre le test hors ligne.
 
 ### Tableau des composants
 
@@ -1076,7 +1076,7 @@ ping chatbot.local
 # → Réponse de 192.168.56.10 : octets=32 temps=1 ms TTL=64
 # → Paquets : envoyés = 4, reçus = 4, perdus = 0 (perte 0%)
 
-# -k : accepte le certificat auto-signé ; -I : en-têtes seulement
+# -k : ne vérifie pas le certificat (le nôtre est auto-signé) ; -I : en-têtes seulement
 # (dans PowerShell, « curl » seul désigne une autre commande : il faut écrire curl.exe)
 curl.exe -kI https://chatbot.local/
 # → HTTP/1.1 200 OK
@@ -1377,7 +1377,7 @@ docker ps
 
 Les tests ci-dessous ont été réalisés sur la VM principale. Les deux tests obligatoires sont le **test de sécurité négatif** (n° 6) et le **test de panne** (n° 10).
 
-Les tests 1 à 5, 8 et 9 ont été faits pendant l'installation, avec leurs captures : chaque ligne du tableau renvoie vers la section où le test est décrit. Les tests 6, 10 et 11 sont détaillés juste après le tableau.
+Les tests 1 à 5, 8 et 9 ont été faits pendant l'installation, avec leurs captures : chaque ligne du tableau renvoie vers la section où le test est décrit. Les tests 6 et 7, 10 et 11 sont détaillés juste après le tableau.
 
 ### Tableau récapitulatif des tests
 
@@ -1469,7 +1469,7 @@ sudo tail -n 2 /var/log/nginx/error.log
 
 ![Journal d'erreurs de Nginx pendant la panne](images/06-panne-log.png){width=90%}
 
-`Connection refused` montre que plus rien n'écoute sur `127.0.0.1:3000`. Ces lignes viennent de l'onglet du navigateur resté ouvert, qui essaie de rouvrir sa connexion WebSocket (`transport=websocket`) toutes les quelques secondes. C'est aussi la preuve que les WebSockets d'Open WebUI passent bien par Nginx.
+`Connection refused` montre que plus rien n'écoute sur `127.0.0.1:3000`. Ces lignes viennent de l'onglet du navigateur resté ouvert, qui essaie de rouvrir sa connexion WebSocket (`transport=websocket`) toutes les quelques secondes. Ces lignes montrent aussi que les connexions WebSocket d'Open WebUI arrivent bien à Nginx, qui essaie de les transmettre au conteneur.
 
 **Remise en service (sur vm-chatbot) :**
 
@@ -1542,7 +1542,7 @@ ssh chatbot10@192.168.56.10
 
 ![Suppression des anciennes empreintes et connexion SSH réussie](images/01-ssh-connexion.png){width=90%}
 
-Avec le recul, il aurait fallu comparer la nouvelle empreinte avec celle de la VM **avant** de taper `yes`. Sinon, on retire le blocage sans savoir si on se connecte bien à la bonne machine. Nous l'avons vérifié après coup avec `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` dans la console de la VM. L'empreinte affichée (`SHA256:NqfKR9P/aX+jd0ZA7720NzHT62ftNAaAiDedb2L4qLbk`) est identique à celle acceptée ici. C'est cette vérification qui figure maintenant dans la procédure.
+Avec le recul, il aurait fallu comparer la nouvelle empreinte avec celle de la VM **avant** de taper `yes`. Sinon, on retire le blocage sans savoir si on se connecte bien à la bonne machine. Nous l'avons vérifié après coup avec `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` dans la console de la VM. L'empreinte affichée (`SHA256:NqfKR9P/aX+jd0ZA770NzHT62ftNAaAiDedb2L4qLbk`) est identique à celle acceptée ici. C'est cette vérification qui figure maintenant dans la procédure.
 
 ---
 
@@ -1638,7 +1638,7 @@ Pour vérifier, on comparerait l'accès à Internet avant et après les règles.
 
 Ollama n'a aucune authentification et écoute sur `0.0.0.0`. Sa protection repose donc entièrement sur le pare-feu. Pour Open WebUI, on a vu au test 7 que le port 3000 est protégé deux fois, par Docker et par le pare-feu. On voit deux possibilités pour faire pareil avec Ollama.
 
-**Première possibilité : n'écouter que sur l'interface Docker.** On remplace `OLLAMA_HOST=0.0.0.0` par `OLLAMA_HOST=172.17.0.1`, l'adresse de `docker0`, la seule par laquelle le conteneur joint Ollama. Il y a deux pièges. Au démarrage, Ollama pourrait se lancer avant que Docker ait créé `docker0`, et l'adresse n'existerait pas encore. Il faut donc déclarer cette dépendance entre services dans systemd, avec `After=docker.service` et `Requires=docker.service` dans le fichier de surcharge. Et les commandes `ollama list` ou `ollama run`, qui cherchent le serveur sur `127.0.0.1` par défaut, ne marcheraient plus. Il faudrait définir `OLLAMA_HOST=172.17.0.1` aussi pour l'utilisateur `chatbot10`.
+**Première possibilité : n'écouter que sur l'interface Docker.** On remplace `OLLAMA_HOST=0.0.0.0` par `OLLAMA_HOST=172.17.0.1`, l'adresse de `docker0`, la seule par laquelle le conteneur joint Ollama. Il y a deux pièges. Au démarrage, Ollama pourrait se lancer avant que Docker ait créé `docker0`, et l'adresse n'existerait pas encore. Il faut donc déclarer cette dépendance entre services dans systemd, avec `After=docker.service` et `Requires=docker.service` dans une section `[Unit]` du fichier de surcharge. Et les commandes `ollama list` ou `ollama run`, qui cherchent le serveur sur `127.0.0.1` par défaut, ne marcheraient plus. Il faudrait définir `OLLAMA_HOST=172.17.0.1` aussi pour l'utilisateur `chatbot10`.
 
 **Autre possibilité : déplacer Ollama dans une deuxième VM.** Une VM web (Nginx et Open WebUI) reste exposée sur le réseau host-only, comme une DMZ. Une VM de calcul (Ollama) n'est reliée à la VM web que par un réseau interne de VirtualBox. Comme l'explique l'exemple de projet HAProxy du cours (encadré « Pourquoi host-only et pas réseau interne ? »), la machine hôte ne peut pas joindre un réseau interne. Pour l'exemple, c'était un inconvénient. Pour notre VM de calcul, c'est justement ce qu'on cherche.
 
